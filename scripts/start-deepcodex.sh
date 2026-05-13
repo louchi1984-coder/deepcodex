@@ -87,12 +87,16 @@ APPLESCRIPT
 }
 
 if [ -z "$CODEX_BIN" ] || [ ! -x "$CODEX_BIN" ]; then
-  alert "Codex Desktop was not found. Install Codex Desktop first, or set CODEX_BIN before launching deepcodex."
+  alert "未找到 Codex Desktop。请先安装 Codex Desktop，或在启动 deepcodex 前设置 CODEX_BIN。
+
+Codex Desktop was not found. Install Codex Desktop first, or set CODEX_BIN before launching deepcodex."
   exit 1
 fi
 
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
-  alert "Node.js was not found. Install Node.js or set NODE_BIN before launching deepcodex."
+  alert "未找到 Node.js。请安装 Node.js，或在启动 deepcodex 前设置 NODE_BIN。
+
+Node.js was not found. Install Node.js or set NODE_BIN before launching deepcodex."
   exit 1
 fi
 
@@ -318,7 +322,11 @@ write_pseudo_login_auth
 
 if [ -z "${UPSTREAM_API_KEY:-}" ]; then
   if [ ! -f "$SETUP_UI_SCRIPT" ]; then
-    alert "DeepCodex setup page is missing. Check $SETUP_UI_SCRIPT."
+    alert "DeepCodex setup 页面不存在。请检查：
+$SETUP_UI_SCRIPT
+
+DeepCodex setup page is missing. Check:
+$SETUP_UI_SCRIPT"
     exit 1
   fi
   if [ -x "$SETUP_UI_BIN" ]; then
@@ -349,9 +357,9 @@ if [ -z "${UPSTREAM_API_KEY:-}" ]; then
   else
     SETUP_ERROR="$(tail -12 "$SETUP_LAST_LOG" 2>/dev/null | sed 's/"/'\''/g' || true)"
     if [ -z "$SETUP_ERROR" ]; then
-      SETUP_ERROR="未提供 DeepSeek API key。"
+      SETUP_ERROR="未提供 DeepSeek API key。 / No DeepSeek API key was provided."
     fi
-    alert "$(printf '首次设置失败：\n\n%s\n\n日志：\n%s' "$SETUP_ERROR" "$SETUP_LAST_LOG")"
+    alert "$(printf '首次设置失败 / First setup failed:\n\n%s\n\n日志 / Logs:\n%s' "$SETUP_ERROR" "$SETUP_LAST_LOG")"
     exit 1
   fi
 fi
@@ -376,7 +384,7 @@ done
 if ! curl -fsS "$TRANSLATOR_URL/health" >/dev/null 2>&1; then
   TRANSLATOR_ERROR="$(tail -20 "$TRANSLATOR_LOG" 2>/dev/null || true)"
   echo "Adaptive translator did not become ready. Check $TRANSLATOR_LOG" >&2
-  alert "$(printf '翻译层启动失败：\n\n%s\n\n日志：\n%s' "$TRANSLATOR_ERROR" "$TRANSLATOR_LOG")"
+  alert "$(printf '翻译层启动失败 / Translator failed to start:\n\n%s\n\n日志 / Logs:\n%s' "$TRANSLATOR_ERROR" "$TRANSLATOR_LOG")"
   exit 1
 fi
 

@@ -47,15 +47,15 @@ function readBody(req) {
 
 async function testKey(key) {
   if (!/^sk-[A-Za-z0-9._-]{16,}$/.test(key)) {
-    throw new Error("看起来不像 DeepSeek API key");
+    throw new Error("看起来不像 DeepSeek API key / This does not look like a DeepSeek API key");
   }
 }
 
 async function testDeepSeekConnection(key) {
   await testKey(key);
   const result = await checkModelsEndpoint(key);
-  if (result.status === 401 || result.status === 403) throw new Error("DeepSeek API key 无效或无权限");
-  if (!result.ok) throw new Error(result.error || `DeepSeek 连接失败 (${result.status || "unknown"})`);
+  if (result.status === 401 || result.status === 403) throw new Error("DeepSeek API key 无效或无权限 / invalid or unauthorized");
+  if (!result.ok) throw new Error(result.error || `DeepSeek 连接失败 / connection failed (${result.status || "unknown"})`);
   currentProfile = defaultDeepSeekProfile(key);
   fs.mkdirSync(path.dirname(profilePath), { recursive: true });
   fs.writeFileSync(profilePath, JSON.stringify(currentProfile, null, 2));
@@ -66,7 +66,7 @@ async function testVisionSupport(key) {
   if (!currentProfile) currentProfile = defaultDeepSeekProfile(key);
   const result = await probeImageInputEndpoint(key, currentProfile.defaultModel || "deepseek-v4-pro");
   if (!result.ok) {
-    throw new NonCriticalUnsupported(result.error || "当前上游未通过读图探测");
+    throw new NonCriticalUnsupported(result.error || "当前上游未通过读图探测 / image input probe did not pass");
   }
   currentProfile.capabilities.vision = true;
   currentProfile.capabilities.imageGeneration = currentProfile.capabilities.imageGeneration || false;
@@ -98,7 +98,7 @@ async function checkModelsEndpoint(key) {
       if (env !== process.env) return { ok: false, status: 0, error: err.message || String(err) };
     }
   }
-  return { ok: false, status: 0, error: "DeepSeek 连接失败" };
+  return { ok: false, status: 0, error: "DeepSeek 连接失败 / connection failed" };
 }
 
 async function probeImageInputEndpoint(key, model) {
@@ -142,7 +142,7 @@ async function probeImageInputEndpoint(key, model) {
       if (env !== process.env) return { ok: false, status: 0, error: err.message || String(err) };
     }
   }
-  return { ok: false, status: 0, error: "读图探测失败" };
+  return { ok: false, status: 0, error: "读图探测失败 / image input probe failed" };
 }
 
 function withoutProxyEnv(source) {
@@ -340,14 +340,14 @@ function page() {
       <div class="logo">${iconUrl ? `<img src="${iconUrl}" alt="">` : "D"}</div>
       <div>
         <h1>DeepCodex</h1>
-      <p class="sub">首次需输入 DeepSeek API key，连通后自动保存</p>
+      <p class="sub" id="subtitle"></p>
       </div>
     </header>
     <form id="form">
-      <label for="key">DeepSeek API key</label>
+      <label for="key" id="keyLabel">DeepSeek API key</label>
       <div class="row">
         <input id="key" name="key" type="password" autocomplete="off" placeholder="sk-..." autofocus>
-        <button id="start" type="submit">开始测试</button>
+        <button id="start" type="submit"></button>
       </div>
     </form>
     <div class="summary" id="summary"></div>
@@ -355,6 +355,32 @@ function page() {
   <script>
     const summary = document.getElementById("summary");
     const button = document.getElementById("start");
+    const isZh = (navigator.language || "").toLowerCase().startsWith("zh");
+    const text = isZh ? {
+      subtitle: "首次需输入 DeepSeek API key，连通后自动保存",
+      keyLabel: "DeepSeek API key",
+      start: "开始测试",
+      testingKey: "正在测试 DeepSeek API key...",
+      testingVision: "正在测试读图能力...",
+      visionDone: "读图能力测试完成",
+      visionUnsupported: "当前上游不支持读图，已按文本模式接入",
+      failed: "连接失败，请检查 API key。",
+      success: "连接成功，正在启动 DeepCodex..."
+    } : {
+      subtitle: "Enter your DeepSeek API key once. It will be saved after the connection test passes.",
+      keyLabel: "DeepSeek API key",
+      start: "Test",
+      testingKey: "Testing DeepSeek API key...",
+      testingVision: "Testing image input support...",
+      visionDone: "Image input test completed",
+      visionUnsupported: "This upstream does not support image input. DeepCodex will use text mode.",
+      failed: "Connection failed. Please check your API key.",
+      success: "Connected. Starting DeepCodex..."
+    };
+    document.documentElement.lang = isZh ? "zh-CN" : "en";
+    document.getElementById("subtitle").textContent = text.subtitle;
+    document.getElementById("keyLabel").textContent = text.keyLabel;
+    button.textContent = text.start;
     function setStatus(text) {
       summary.textContent = text;
     }
@@ -363,7 +389,7 @@ function page() {
       const key = document.getElementById("key").value.trim();
       if (!key) return;
       button.disabled = true;
-      setStatus("正在测试 DeepSeek API key...");
+      setStatus(text.testingKey);
       const res = await fetch("/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -381,14 +407,14 @@ function page() {
         for (const line of lines) {
           if (!line.trim()) continue;
           const event = JSON.parse(line);
-          if (event.type === "start" && event.id === "connect") setStatus("正在测试 DeepSeek API key...");
-          if (event.type === "pass" && event.id === "connect") setStatus("正在测试读图能力...");
-          if (event.type === "start" && event.id === "vision") setStatus("正在测试读图能力...");
-          if (event.type === "pass" && event.id === "vision") setStatus("读图能力测试完成");
-          if (event.type === "unsupported" && event.id === "vision") setStatus("当前上游不支持读图，已按文本模式接入");
-          if (event.type === "fail") setStatus(event.error || "连接失败，请检查 API key。");
+          if (event.type === "start" && event.id === "connect") setStatus(text.testingKey);
+          if (event.type === "pass" && event.id === "connect") setStatus(text.testingVision);
+          if (event.type === "start" && event.id === "vision") setStatus(text.testingVision);
+          if (event.type === "pass" && event.id === "vision") setStatus(text.visionDone);
+          if (event.type === "unsupported" && event.id === "vision") setStatus(text.visionUnsupported);
+          if (event.type === "fail") setStatus(event.error || text.failed);
           if (event.type === "done") {
-            setStatus(event.ok ? "连接成功，正在启动 DeepCodex..." : "连接失败，请检查 API key。");
+            setStatus(event.ok ? text.success : text.failed);
             button.disabled = false;
           }
         }

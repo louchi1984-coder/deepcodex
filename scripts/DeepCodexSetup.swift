@@ -1,14 +1,19 @@
 import AppKit
 import Foundation
 
+func tr(_ zh: String, _ en: String) -> String {
+    let language = Locale.preferredLanguages.first?.lowercased() ?? ""
+    return language.hasPrefix("zh") ? zh : en
+}
+
 struct SetupTest: Codable {
     let id: String
     let label: String
 }
 
 let tests: [SetupTest] = [
-    .init(id: "connect", label: "连接 DeepSeek"),
-    .init(id: "vision", label: "测试读图能力")
+    .init(id: "connect", label: tr("连接 DeepSeek", "Connect to DeepSeek")),
+    .init(id: "vision", label: tr("测试读图能力", "Test image input"))
 ]
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -35,16 +40,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(NSMenuItem(title: "退出 DeepCodex", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenu.addItem(NSMenuItem(title: tr("退出 DeepCodex", "Quit DeepCodex"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         appItem.submenu = appMenu
 
         let editItem = NSMenuItem()
         mainMenu.addItem(editItem)
-        let editMenu = NSMenu(title: "编辑")
-        editMenu.addItem(NSMenuItem(title: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
-        editMenu.addItem(NSMenuItem(title: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
-        editMenu.addItem(NSMenuItem(title: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
-        editMenu.addItem(NSMenuItem(title: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        let editMenu = NSMenu(title: tr("编辑", "Edit"))
+        editMenu.addItem(NSMenuItem(title: tr("剪切", "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: tr("复制", "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: tr("粘贴", "Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: tr("全选", "Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editItem.submenu = editMenu
 
         NSApp.mainMenu = mainMenu
@@ -71,7 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let title = NSTextField(labelWithString: "DeepCodex")
         title.font = .systemFont(ofSize: 26, weight: .bold)
 
-        let subtitle = NSTextField(labelWithString: "首次需输入 DeepSeek API key，连通后自动保存")
+        let subtitle = NSTextField(labelWithString: tr("首次需输入 DeepSeek API key，连通后自动保存", "Enter your DeepSeek API key once. It will be saved after the connection test passes."))
         subtitle.font = .systemFont(ofSize: 14)
         subtitle.textColor = .secondaryLabelColor
 
@@ -84,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyField.bezelStyle = .roundedBezel
         keyField.controlSize = .large
 
-        button = NSButton(title: "开始测试", target: self, action: #selector(startTests))
+        button = NSButton(title: tr("开始测试", "Test"), target: self, action: #selector(startTests))
         button.bezelStyle = .rounded
         button.controlSize = .large
         button.keyEquivalent = "\r"
@@ -141,11 +146,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !key.isEmpty else { return }
         button.isEnabled = false
         lastFailureDetail = ""
-        summary.stringValue = "正在测试 DeepSeek API key..."
+        summary.stringValue = tr("正在测试 DeepSeek API key...", "Testing DeepSeek API key...")
         startNodeServer { [weak self] ok in
             guard ok else {
                 self?.button.isEnabled = true
-                self?.summary.stringValue = "启动测试服务失败"
+                self?.summary.stringValue = tr("启动测试服务失败", "Failed to start the setup test service")
                 return
             }
             self?.runRemoteTests(key: key)
@@ -212,18 +217,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let id = json["id"] as? String ?? ""
             let detail = json["detail"] as? String ?? json["error"] as? String ?? ""
             if type == "start" {
-                self.summary.stringValue = id == "vision" ? "正在测试读图能力..." : "正在测试 DeepSeek API key..."
+                self.summary.stringValue = id == "vision" ? tr("正在测试读图能力...", "Testing image input support...") : tr("正在测试 DeepSeek API key...", "Testing DeepSeek API key...")
             }
             if type == "pass" {
                 if id == "connect" {
-                    self.summary.stringValue = "正在测试读图能力..."
+                    self.summary.stringValue = tr("正在测试读图能力...", "Testing image input support...")
                 } else if id == "vision" {
-                    self.summary.stringValue = "读图能力测试完成"
+                    self.summary.stringValue = tr("读图能力测试完成", "Image input test completed")
                 }
             }
             if type == "unsupported" {
                 self.lastFailureDetail = detail
-                self.summary.stringValue = "当前上游不支持读图，已按文本模式接入"
+                self.summary.stringValue = tr("当前上游不支持读图，已按文本模式接入", "This upstream does not support image input. DeepCodex will use text mode.")
             }
             if type == "fail" {
                 self.lastFailureDetail = detail
@@ -231,7 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if type == "done" {
                 let ok = json["ok"] as? Bool ?? false
-                self.summary.stringValue = ok ? "连接成功，正在启动 DeepCodex..." : (self.lastFailureDetail.isEmpty ? "连接失败，请检查 API key。" : self.lastFailureDetail)
+                self.summary.stringValue = ok ? tr("连接成功，正在启动 DeepCodex...", "Connected. Starting DeepCodex...") : (self.lastFailureDetail.isEmpty ? tr("连接失败，请检查 API key。", "Connection failed. Please check your API key.") : self.lastFailureDetail)
                 if ok {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                         self.finishWithKey()

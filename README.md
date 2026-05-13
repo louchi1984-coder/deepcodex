@@ -2,15 +2,23 @@
 
 把 Codex Desktop 接到 DeepSeek 上的轻量补丁。
 
+Lightweight macOS patch that routes Codex Desktop through DeepSeek while keeping the familiar Codex workflow.
+
 > **Platform**
 >  
 > 当前仅支持 **macOS**。  
 > **Windows 版本稍后提供。**
+>
+> Currently **macOS only**.  
+> **Windows support will come later.**
 
 > **License / 使用限制**
 >  
 > 本项目当前仅允许个人学习、研究和非商业使用。  
 > **禁止商用、转售、托管服务、付费集成或任何形式的商业化再分发。**
+>
+> Personal, research, and non-commercial use only.  
+> **Commercial use, resale, hosted services, paid integrations, and commercial redistribution are not allowed.**
 
 它不重做 IDE，也不重写一整套插件生态。  
 它只做几件关键的事：
@@ -39,6 +47,14 @@ Prerequisite: install **Codex Desktop** first. deepcodex will automatically loca
 1. 打开 `/Applications/deepcodex.app`
 2. 输入 DeepSeek API key
 3. 开始使用
+
+Then:
+
+1. Open `/Applications/deepcodex.app`
+2. Enter your DeepSeek API key
+3. Start using DeepCodex
+
+The first-run setup UI follows your macOS/browser language: Simplified Chinese for `zh*` locales, English otherwise.
 
 ---
 
