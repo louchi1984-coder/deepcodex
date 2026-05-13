@@ -1,28 +1,36 @@
 # 发布短帖
 
-## GitHub / 即刻 / X 风格
+## 主推版本
 
-我做了一个小工具：DeepCodex。
+DeepCodex 发了。
 
-它不是新 IDE，也不是重写一套 Codex，而是一个 macOS 轻量补丁：
+我做了一个可以和原版 Codex 双开的 DeepSeek 版 Codex 补丁。
 
-> Codex Desktop + DeepSeek route patch
+它不是终端脚本，也不是网页代理，而是一个独立 macOS App：
 
-它做的事情很简单：
-
-- 保留 Codex Desktop 的主要使用手感
+- 独立 logo
+- 独立入口
 - 首次输入 DeepSeek API key
-- 本机启动 translator
-- 把 Codex 请求转成 DeepSeek 能接的格式
-- 再把结果翻译回 Codex
+- 原版 Codex 和 DeepCodex 可以并排存在
+- 本地 translator 自动把 Codex 请求转到 DeepSeek
 
-这版适合日常写代码、改项目、生成文件、整理资料。
+这版最核心的不是“换 base URL”，而是做了一层近乎完整的兼容层：
 
-边界也说清楚：connector、computer-use、某些 app tools 这类依赖 OpenAI/Codex 宿主授权和工具下发的高级能力，目前不承诺完全支持。
+- tool calls
+- context compaction
+- reasoning replay
+- model alias
+- web_search / web_fetch
+- 伪工具调用清理
+- 中文对话里的思考/状态收敛
 
-当前仅支持 macOS，Windows 稍后。
+日常写代码、改项目、生成文件，已经能认真用了。
 
-仅允许个人学习、研究和非商业使用。
+边界也说清楚：computer-use、connector、app tools 这类依赖 OpenAI 宿主授权和工具下发的能力，目前不承诺完全等价。
+
+macOS only，Windows 稍后。
+
+非商业使用。
 
 GitHub:
 
@@ -30,15 +38,28 @@ https://github.com/louchi1984-coder/deepcodex
 
 ## 更短版本
 
-DeepCodex 发了。
+DeepCodex 发布。
 
-一个把 Codex Desktop 接到 DeepSeek 上的 macOS 轻量补丁。
+一个可以和原版 Codex 双开的 DeepSeek 版 Codex 补丁。
 
-不重写 Codex，不重做插件系统，只做本地 translator 和 DeepSeek 路由。
+独立 App，独立 logo，首次输入 DeepSeek API key。
 
-适合日常代码和项目任务。
+核心是一层本地 translator：兼容 tool calls、上下文压缩、推理内容、模型映射和搜索工具。
 
-当前 macOS only，非商业使用。
+不是简单换 base URL。
 
+macOS 版已发布，非商业使用。
+
+https://github.com/louchi1984-coder/deepcodex
+
+## 极短版本
+
+我做了一个 DeepSeek 版 Codex：DeepCodex。
+
+独立 macOS App，可以和原版 Codex 双开。
+
+不是简单代理，而是带 tool calls、上下文压缩、推理内容兼容层的本地 translator。
+
+GitHub:
 https://github.com/louchi1984-coder/deepcodex
 

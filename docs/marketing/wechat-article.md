@@ -2,129 +2,211 @@
 
 ## 标题备选
 
-1. 我把 Codex Desktop 接到了 DeepSeek 上
-2. DeepCodex：一个把 Codex 接入 DeepSeek 的轻量补丁
-3. 不重做 Codex，只给它换一条 DeepSeek 路由
-4. 我做了一个 macOS 小补丁，让 Codex Desktop 可以跑 DeepSeek
+1. 我做了一个可以和 Codex 双开的 DeepSeek 版 Codex
+2. DeepCodex：把 Codex Desktop 接到 DeepSeek，还能和原版双开
+3. 一个独立图标、独立入口、可双开的 DeepSeek 版 Codex 补丁
+4. 我没有重写 Codex，但我让它几乎能跑在 DeepSeek 上
+5. DeepCodex 发布：给 Codex Desktop 加一条 DeepSeek 路由
 
 ## 推荐标题
 
-# 我把 Codex Desktop 接到了 DeepSeek 上
+# 我做了一个可以和 Codex 双开的 DeepSeek 版 Codex
 
-很多 AI 工具的问题，不是它不能用，而是你已经习惯了一套工作流，却突然被模型、账号、额度、路由、工具生态这些东西卡住。
+我最近做了一个小东西：**DeepCodex**。
 
-我最近就在折腾这样一件事：
+它不是“又一个 AI 编辑器”。
 
-> 能不能保留 Codex Desktop 的使用手感，但把模型请求转到 DeepSeek？
+也不是把 Codex Desktop 重新写一遍。
 
-不是重新写一个 IDE，也不是再造一套插件系统，更不是做一个“全能替代品”。
+它更像一个很锋利的补丁：
 
-只是一个更务实的补丁：
+> 给 Codex Desktop 接上一条 DeepSeek 路由，同时尽量保留原版 Codex 的使用手感。
 
-> **DeepCodex = Codex Desktop + DeepSeek 路由补丁。**
-
-现在第一版已经放到 GitHub：
+现在它已经放到 GitHub：
 
 https://github.com/louchi1984-coder/deepcodex
 
-目前只支持 macOS，Windows 后面再补。
+目前是 macOS 版，Windows 稍后。
 
-## 它到底解决什么问题？
+## 最爽的一点：它像一个独立 App
 
-Codex Desktop 很适合做代码、项目修改、文件协作和日常开发任务。它的交互、项目感、工具组织方式都已经比较顺。
+DeepCodex 不是让你在终端里敲一堆命令，也不是让你打开一个奇怪的代理网页。
 
-但如果你想在这套体验里接入 DeepSeek，就会遇到几个现实问题：
+安装后，它会出现在“应用程序”里：
 
-- Codex 发出的不是普通 Chat Completions 请求
-- DeepSeek 接口和 Codex 的请求/响应形态并不完全一致
-- 工具调用、流式输出、压缩上下文、伪登录态、工作区状态都要处理
-- 如果自己重做整个客户端，成本太高，也很容易把原本顺手的体验做坏
+```text
+/Applications/deepcodex.app
+```
 
-所以 DeepCodex 选择了一条更窄的路：
+它有自己的图标，有自己的入口，有自己的首次启动界面。
 
-不重做 Codex。
+你可以把它当成一个独立 App 打开。
 
-只做中间层。
+更重要的是：
 
-它在本机启动一个 translator，把 Codex Desktop 的请求翻译成 DeepSeek 能理解的格式，再把 DeepSeek 的响应翻译回 Codex 能展示的格式。
+> **它可以和原版 Codex 双开。**
 
-这听起来很简单，但真正麻烦的地方在于：你不能只转一句文本。
+原版 Codex 继续走原来的 OpenAI/Codex 路线。
 
-你要处理工具调用、上下文压缩、推理内容、模型别名、图片能力探测、插件边界、工作目录、macOS 权限提示，以及各种 DeepSeek 可能吐出来但 Codex 不认识的内容。
+DeepCodex 走 DeepSeek 路线。
 
-## 这一版现在能做什么？
+两边可以并排存在，不需要你把原来的 Codex 弄坏，也不需要你在一个 App 里来回切来切去。
 
-第一版的目标很克制：
+这件事听起来只是“图标和入口”，但实际体验差很多。
 
-- 以独立 macOS app 形式启动：`/Applications/deepcodex.app`
-- 首次输入 DeepSeek API key，连通后自动保存
-- 自动启动本地 translator
-- 把 Codex 模型请求转到 DeepSeek
-- 保留 Codex Desktop 的主要使用手感
-- 使用独立工作区和独立状态目录
-- 支持中英文 setup 文案
-- 保留 DeepCodex 自己的图标和入口
+一个工具像不像独立产品，很多时候就差这一层。
 
-日常写代码、改项目、生成文件、整理资料、让它做一个小工具或页面，这些核心任务已经可以跑起来。
+## 它真正难的地方，不是“转发请求”
 
-## 它不是什么？
+很多人第一反应会是：
 
-我也想把边界说清楚。
+> 不就是把 base URL 改成 DeepSeek 吗？
 
-DeepCodex 现在不是：
+真不是。
 
-- 一个完全独立的新客户端
-- 一套自己重做的插件平台
-- 一个 100% 复刻 OpenAI 宿主能力的替代品
+Codex Desktop 发出来的请求，不是普通聊天软件那种“用户一句话，模型回一句话”。
 
-尤其是 connector、app tools、computer-use 这类能力，很多本质上依赖 Codex/OpenAI 宿主的工具下发、账号授权和运行环境。
+这里面有：
 
-所以这版的策略是：
+- Responses API 形态
+- Chat Completions 兼容
+- tool calls
+- namespace tools
+- custom tools
+- context compaction
+- reasoning replay
+- stream events
+- 模型别名
+- 图片能力探测
+- 本地 web_search / web_fetch
+- 工作区与路径
+- macOS 权限提示
+- DeepSeek 偶尔吐出的伪工具调用文本
 
-- 插件仍然安装在 Codex 公共宿主里
-- DeepCodex 尽量复用 Codex 已安装插件
-- DeepCodex 主要负责模型路由和协议翻译
-- 如果某个高级工具没有下发到 DeepSeek 会话里，不把它包装成“已经支持”
+所以 DeepCodex 的核心，其实是一个**近乎完整的兼容层**。
 
-这听起来不够刺激，但我觉得这是正确的产品边界。
+它在本机启动一个 translator：
 
-一个补丁，首先要稳定。
+```text
+Codex Desktop
+  -> DeepCodex translator
+  -> DeepSeek API
+```
 
-## 为什么不直接重做一个？
+这个 translator 负责把 Codex 的请求拆开、理解、翻译，再送给 DeepSeek。
 
-因为“重做一个 Codex”听起来很爽，实际会迅速掉进坑里。
+DeepSeek 回来以后，再把响应整理成 Codex 能识别、能展示、能继续工作的形态。
 
-你要处理：
+这不是简单代理。
 
-- 项目选择
-- 文件权限
-- 插件安装
-- MCP 工具
-- app connector
-- 浏览器预览
-- 会话存档
-- 上下文压缩
-- 模型目录
-- 多窗口和 macOS 图标
-- 工作区路径
+这是协议适配。
 
-任何一个点做坏，用户都会觉得“不如原版顺”。
+## 为什么说“近乎完善”？
 
-DeepCodex 的判断是：
+因为这版已经不是只把文本接通了。
 
-原版 Codex 已经顺的地方，尽量不要碰。
+它处理了很多真实使用里才会撞到的问题：
 
-我们只改必须改的地方：
+- Codex 模型名映射到 DeepSeek 模型
+- DeepSeek 推理内容回放
+- 上下文压缩结果转换
+- tool calls 不乱丢
+- 不认识的工具调用尽量保留给 Codex 判断
+- 内置 web_search / web_fetch 能在 DeepSeek 路线里工作
+- 伪 DSML 工具调用不直接污染最终回答
+- 中文对话里暴露出来的思考/状态尽量保持中文
+- setup 走中英双语
+- macOS 权限提示避免一闪而过
+- 独立工作区，避免和原版 Codex 完全搅在一起
 
-> 模型入口、协议翻译、DeepSeek key、独立工作区。
+这中间最折磨的不是“让它返回一句话”。
 
-这也是这版反复收口后的最终方向。
+而是让它在一轮又一轮工具调用、压缩、失败重试、路径切换之后，仍然像 Codex 那样继续工作。
+
+## 第一次启动是什么体验？
+
+安装完成后，直接双击 DeepCodex。
+
+第一次会出现一个很简单的 setup 窗口：
+
+1. 输入 DeepSeek API key
+2. 测试 key 是否可用
+3. 探测基础能力
+4. 通过后自动进入 DeepCodex
+
+之后再打开，就不需要重复输入。
+
+你看到的是一个带 DeepCodex 图标的独立 App，而不是“原版 Codex 被偷偷改坏了”。
+
+这点对我很重要。
+
+DeepCodex 应该是一个补丁，但它不应该像一团临时脚本。
+
+## 和原版 Codex 是什么关系？
+
+DeepCodex 不是要替代原版 Codex。
+
+它是并排存在。
+
+你可以这样理解：
+
+- 原版 Codex：继续保留，继续走原来的能力路线
+- DeepCodex：独立启动，走 DeepSeek 模型路线
+
+如果你有一些任务更适合原版，就继续用原版。
+
+如果你想用 DeepSeek 跑日常代码、项目修改、生成文件，就打开 DeepCodex。
+
+这也是为什么我一直坚持它要有独立 logo、独立入口、独立 app。
+
+不是为了好看。
+
+是为了让用户心智清楚：
+
+> 这是同一套 Codex 工作流的另一条模型路线。
+
+## 它现在能做什么？
+
+这一版已经适合做这些事：
+
+- 日常代码修改
+- 项目结构调整
+- 生成小工具、小页面、小游戏
+- 文件创建与编辑
+- 长对话里的上下文续接
+- 常规 shell / 项目任务
+- 需要搜索时走本地 web_search / web_fetch
+- 中文使用场景
+
+它不是演示用的“Hello World 接通”。
+
+它已经过了大量真实项目折腾，包括 UI、图标、路径、工具调用、上下文压缩、搜索、权限、双开、工作区这些很烦但很关键的问题。
+
+## 边界也说清楚
+
+DeepCodex 现在仍然不是完整替代品。
+
+尤其是这些能力，目前不承诺完全等价：
+
+- `computer-use`
+- Gmail / Google Drive / Slack 这类 connector / app tools
+- 依赖 OpenAI 宿主授权和工具下发的高级插件能力
+
+原因不是“按钮没做”。
+
+而是这些能力本身可能绑定 OpenAI/Codex 宿主的账号、连接器授权和工具下发链路。
+
+DeepCodex 现在选择不硬吹。
+
+它要先把最核心的事情做好：
+
+> 让 Codex Desktop 的主要开发体验，稳定跑在 DeepSeek 路线上。
 
 ## 安装方式
 
-先安装本机 Codex Desktop。
+先确保本机已经安装 Codex Desktop。
 
-然后克隆仓库：
+然后：
 
 ```bash
 git clone https://github.com/louchi1984-coder/deepcodex.git
@@ -132,59 +214,59 @@ cd deepcodex
 ./scripts/install-deepcodex-app.sh
 ```
 
-安装完成后打开：
+安装完成后，从“应用程序”里打开：
 
 ```text
-/Applications/deepcodex.app
+deepcodex.app
 ```
 
-首次启动会要求输入 DeepSeek API key。连通后会保存到本机运行目录，后续直接进入 DeepCodex。
-
-## 适合谁？
-
-如果你想要的是：
-
-- 保留 Codex Desktop 的主要体验
-- 用 DeepSeek 跑日常代码和项目任务
-- 不想为了换模型入口再学一套工具
-- 能接受这目前是 macOS 版、轻量补丁形态
-
-那 DeepCodex 可能正好适合你。
-
-如果你需要的是：
-
-- 所有 OpenAI hosted tools 完全等价
-- 所有 connector/app tools 完全打通
-- 商业化部署
-- Windows 立即可用
-
-那这版还不是那个目标。
+首次输入 DeepSeek API key，连通后自动保存。
 
 ## 开源与限制
 
-DeepCodex 已经放到 GitHub，但当前许可证限制为：
+DeepCodex 当前仅允许：
 
-> 仅允许个人学习、研究和非商业使用。
+- 个人学习
+- 研究
+- 非商业使用
 
-不允许商用、转售、托管服务、付费集成或商业化再分发。
+不允许：
 
-原因也很简单：这个项目现在更像一个个人工作流补丁和研究原型，还不适合被拿去包装成商业产品。
+- 商用
+- 转售
+- 托管服务
+- 付费集成
+- 商业化再分发
+
+它现在更像一个个人工作流补丁和技术实验，不适合被直接包装成商业产品。
 
 ## 最后
 
-我做 DeepCodex 最大的感受是：
+我做 DeepCodex 的真正目的，不是“再做一个 AI 工具”。
 
-真正难的不是“把请求转发给另一个模型”。
+而是想验证一件事：
 
-真正难的是让一个复杂工具在换了模型路由之后，仍然像原来一样能用。
+> 一个复杂的 AI 客户端，能不能在不破坏原有手感的情况下，接入另一套模型路线？
 
-所以这版我没有把话说满。
+现在答案已经比较清楚了。
 
-它不是万能替代品。
+可以。
 
-它是一个能把 Codex Desktop 稳定接到 DeepSeek 上的实用补丁。
+而且体验可以做到很接近原生：
 
-如果你也在用 Codex Desktop，又想试试 DeepSeek 路线，可以从这里开始：
+- 独立 App
+- 独立 logo
+- 可双开
+- DeepSeek key setup
+- 本地 translator
+- 近乎完善的兼容层
+- 保留 Codex Desktop 的主要工作流
+
+DeepCodex 不是万能替代品。
+
+但它已经是一个能认真使用的 DeepSeek 版 Codex 路由补丁。
+
+GitHub：
 
 https://github.com/louchi1984-coder/deepcodex
 
