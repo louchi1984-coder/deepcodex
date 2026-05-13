@@ -9,6 +9,7 @@ DEEPCODEX_WORKSPACE="${DEEPCODEX_WORKSPACE:-}"
 DEEPCODEX_PROJECTS_ROOT="${DEEPCODEX_PROJECTS_ROOT:-$HOME/Documents/deepcodex}"
 TRANSLATOR_URL="${TRANSLATOR_URL:-http://127.0.0.1:8282}"
 TRANSLATOR_LOG="${TRANSLATOR_LOG:-$DEEPCODEX_STATE_ROOT/adaptive-translator.log}"
+TRANSLATOR_PID_FILE="${TRANSLATOR_PID_FILE:-$DEEPCODEX_STATE_ROOT/adaptive-translator.pid}"
 DEEP_CODEX_ENV_FILE="${DEEP_CODEX_ENV_FILE:-$DEEPCODEX_STATE_ROOT/.deepcodex.env}"
 SETUP_LAST_LOG="${DEEP_CODEX_SETUP_LAST_LOG:-$DEEPCODEX_STATE_ROOT/.deepcodex-setup-last.log}"
 SETUP_UI_SCRIPT="$ROOT/scripts/deepcodex-setup-ui.mjs"
@@ -20,7 +21,6 @@ SHARED_CONFIG_SYNC="$ROOT/scripts/sync-shared-codex-config.mjs"
 PLUGIN_HOST_SYNC_SCRIPT="$ROOT/scripts/sync-shared-codex-plugin-host.mjs"
 CONFIG_TEMPLATE_PATH="${DEEPCODEX_CONFIG_TEMPLATE:-$ROOT/codex-home-deepseek-app/config.adaptive-oneapi.toml}"
 MODEL_CATALOG_TEMPLATE_PATH="${DEEPCODEX_MODEL_CATALOG_TEMPLATE:-$ROOT/codex-home-deepseek-app/deepseek-model-catalog.json}"
-TRANSLATOR_STARTED_PID=""
 LOCAL_CODEX_API_KEY="${LOCAL_CODEX_API_KEY:-sk-codex-deepseek-local}"
 DEEPCODEX_DISPLAY_NAME="${DEEPCODEX_DISPLAY_NAME:-娄老师说的对}"
 
@@ -99,13 +99,6 @@ if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
 Node.js was not found. Install Node.js or set NODE_BIN before launching deepcodex."
   exit 1
 fi
-
-cleanup() {
-  if [ -n "$TRANSLATOR_STARTED_PID" ]; then
-    kill "$TRANSLATOR_STARTED_PID" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT INT TERM
 
 read_deepseek_key() {
   if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
@@ -369,9 +362,14 @@ if ! curl -fsS "$TRANSLATOR_URL/health" >/dev/null 2>&1; then
   : > "$TRANSLATOR_LOG"
   (
     cd "$ROOT"
-    UPSTREAM_URL="${UPSTREAM_URL:-https://api.deepseek.com/v1}" UPSTREAM_API_KEY="$UPSTREAM_API_KEY" TRANSLATOR_PROFILE_PATH="$PROVIDER_PROFILE_PATH" exec "$ROOT/scripts/start-adaptive-translator.sh"
-  ) > "$TRANSLATOR_LOG" 2>&1 &
-  TRANSLATOR_STARTED_PID="$!"
+    nohup env \
+      UPSTREAM_URL="${UPSTREAM_URL:-https://api.deepseek.com/v1}" \
+      UPSTREAM_API_KEY="$UPSTREAM_API_KEY" \
+      TRANSLATOR_PROFILE_PATH="$PROVIDER_PROFILE_PATH" \
+      "$ROOT/scripts/start-adaptive-translator.sh" \
+      >> "$TRANSLATOR_LOG" 2>&1 < /dev/null &
+    echo "$!" > "$TRANSLATOR_PID_FILE"
+  )
 fi
 
 for _ in $(seq 1 45); do
