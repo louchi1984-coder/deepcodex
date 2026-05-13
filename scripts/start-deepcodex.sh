@@ -10,6 +10,7 @@ DEEPCODEX_PROJECTS_ROOT="${DEEPCODEX_PROJECTS_ROOT:-$HOME/Documents/deepcodex}"
 TRANSLATOR_URL="${TRANSLATOR_URL:-http://127.0.0.1:8282}"
 TRANSLATOR_LOG="${TRANSLATOR_LOG:-$DEEPCODEX_STATE_ROOT/adaptive-translator.log}"
 TRANSLATOR_PID_FILE="${TRANSLATOR_PID_FILE:-$DEEPCODEX_STATE_ROOT/adaptive-translator.pid}"
+TRANSLATOR_WATCH_PID_FILE="${TRANSLATOR_WATCH_PID_FILE:-$DEEPCODEX_STATE_ROOT/adaptive-translator-watch.pid}"
 DEEP_CODEX_ENV_FILE="${DEEP_CODEX_ENV_FILE:-$DEEPCODEX_STATE_ROOT/.deepcodex.env}"
 SETUP_LAST_LOG="${DEEP_CODEX_SETUP_LAST_LOG:-$DEEPCODEX_STATE_ROOT/.deepcodex-setup-last.log}"
 SETUP_UI_SCRIPT="$ROOT/scripts/deepcodex-setup-ui.mjs"
@@ -21,6 +22,7 @@ SHARED_CONFIG_SYNC="$ROOT/scripts/sync-shared-codex-config.mjs"
 PLUGIN_HOST_SYNC_SCRIPT="$ROOT/scripts/sync-shared-codex-plugin-host.mjs"
 CONFIG_TEMPLATE_PATH="${DEEPCODEX_CONFIG_TEMPLATE:-$ROOT/codex-home-deepseek-app/config.adaptive-oneapi.toml}"
 MODEL_CATALOG_TEMPLATE_PATH="${DEEPCODEX_MODEL_CATALOG_TEMPLATE:-$ROOT/codex-home-deepseek-app/deepseek-model-catalog.json}"
+TRANSLATOR_WATCH_SCRIPT="$ROOT/scripts/deepcodex-translator-watch.sh"
 LOCAL_CODEX_API_KEY="${LOCAL_CODEX_API_KEY:-sk-codex-deepseek-local}"
 DEEPCODEX_DISPLAY_NAME="${DEEPCODEX_DISPLAY_NAME:-娄老师说的对}"
 
@@ -360,16 +362,21 @@ fi
 if ! curl -fsS "$TRANSLATOR_URL/health" >/dev/null 2>&1; then
   echo "Starting adaptive translator at $TRANSLATOR_URL ..."
   : > "$TRANSLATOR_LOG"
-  (
-    cd "$ROOT"
-    nohup env \
-      UPSTREAM_URL="${UPSTREAM_URL:-https://api.deepseek.com/v1}" \
-      UPSTREAM_API_KEY="$UPSTREAM_API_KEY" \
-      TRANSLATOR_PROFILE_PATH="$PROVIDER_PROFILE_PATH" \
-      "$ROOT/scripts/start-adaptive-translator.sh" \
-      >> "$TRANSLATOR_LOG" 2>&1 < /dev/null &
-    echo "$!" > "$TRANSLATOR_PID_FILE"
-  )
+fi
+
+watch_pid="$(cat "$TRANSLATOR_WATCH_PID_FILE" 2>/dev/null || true)"
+if [ -z "$watch_pid" ] || ! ps -p "$watch_pid" >/dev/null 2>&1; then
+  nohup env \
+    DEEPCODEX_STATE_ROOT="$DEEPCODEX_STATE_ROOT" \
+    TRANSLATOR_URL="$TRANSLATOR_URL" \
+    TRANSLATOR_LOG="$TRANSLATOR_LOG" \
+    TRANSLATOR_PID_FILE="$TRANSLATOR_PID_FILE" \
+    TRANSLATOR_WATCH_PID_FILE="$TRANSLATOR_WATCH_PID_FILE" \
+    UPSTREAM_URL="${UPSTREAM_URL:-https://api.deepseek.com/v1}" \
+    UPSTREAM_API_KEY="$UPSTREAM_API_KEY" \
+    TRANSLATOR_PROFILE_PATH="$PROVIDER_PROFILE_PATH" \
+    "$TRANSLATOR_WATCH_SCRIPT" \
+    >> "$TRANSLATOR_LOG" 2>&1 < /dev/null &
 fi
 
 for _ in $(seq 1 45); do
