@@ -14,6 +14,7 @@
 - 首次输入 DeepSeek API key
 - 本地 translator 自动接管路由
 - 近乎完善的 Codex ↔ DeepSeek 兼容层
+- 尽量复用 Codex 已安装插件和 skills
 - macOS 版已发布
 
 ### 画面结构
@@ -25,7 +26,7 @@
 | 9-15s | 首次启动 setup，输入 DeepSeek API key | 第一次打开，输入 DeepSeek API key，连通后自动保存。 |
 | 15-23s | DeepCodex 主界面启动，模型显示 DeepSeek 路线 | 后面再打开，就像一个独立的 DeepCodex。原版 Codex 还在，DeepCodex 也能单独跑。 |
 | 23-34s | 展示 translator 三层结构图 | 中间最关键的是这个本地 translator，它把 Codex 的复杂请求翻译给 DeepSeek。 |
-| 34-47s | 展示工具调用、文件修改、搜索、上下文续接片段 | 不是简单转发文本，而是处理 tool calls、压缩上下文、推理内容、模型映射和伪工具调用。 |
+| 34-47s | 展示工具调用、文件修改、搜索、上下文续接片段 | 不是简单转发文本，而是处理 tool calls、压缩上下文、推理内容、模型映射、插件 skills 和伪工具调用。 |
 | 47-55s | 展示生成项目、修改文件、预览结果 | 所以日常写代码、改项目、生成文件，这版已经能认真用了。 |
 | 55-60s | GitHub README，logo 和地址 | 项目叫 DeepCodex，macOS 版已发布，GitHub 上可以看。 |
 
@@ -45,13 +46,13 @@
 
 最关键的是中间这层 translator。
 
-它不是简单把文本转发给 DeepSeek，而是尽量兼容 Codex 的完整请求结构：tool calls、上下文压缩、推理内容、模型别名、搜索工具、伪工具调用，这些都要处理。
+它不是简单把文本转发给 DeepSeek，而是尽量兼容 Codex 的完整请求结构：tool calls、上下文压缩、推理内容、模型别名、搜索工具、插件 skills、伪工具调用，这些都要处理。
 
 所以这版已经不是 Hello World。
 
 它可以比较认真地做日常代码、项目修改、文件生成和中文开发任务。
 
-边界也说清楚：computer-use、connector 这类依赖 OpenAI 宿主授权的高级能力，目前不承诺完全支持。
+插件和 skills 这块，它不重新造一套市场，而是尽量复用 Codex 已安装的生态。普通 skills 和本地工作流尽量带过来，connector、computer-use 这类依赖 OpenAI 宿主授权的高级能力，目前不承诺完全支持。
 
 但如果你想保留 Codex Desktop 的手感，同时用 DeepSeek 跑日常开发任务，DeepCodex 已经可以试了。
 
@@ -83,7 +84,7 @@ GitHub 搜 deepcodex。
 
 实际不是。
 
-Codex Desktop 发出来的请求里，有 Responses API、有 tool calls、有上下文压缩、有推理内容、有模型映射，还有各种工具和工作区状态。
+Codex Desktop 发出来的请求里，有 Responses API、有 tool calls、有上下文压缩、有推理内容、有模型映射，还有插件、skills、工具和工作区状态。
 
 所以我做了 DeepCodex。
 
@@ -99,11 +100,11 @@ DeepCodex 走 DeepSeek 路线。
 
 之后打开 DeepCodex，本地 translator 会自动启动，把 Codex 的请求翻译给 DeepSeek，再把 DeepSeek 的响应翻译回 Codex 能继续工作的格式。
 
-这版已经处理了不少真实使用里才会遇到的坑：工具调用不能乱丢，压缩上下文要能续接，DeepSeek 吐出的伪工具调用不能直接污染 UI，中文对话里的思考和状态也要尽量保持中文。
+这版已经处理了不少真实使用里才会遇到的坑：工具调用不能乱丢，压缩上下文要能续接，普通 skills 和插件工作流要尽量复用，DeepSeek 吐出的伪工具调用不能直接污染 UI，中文对话里的思考和状态也要尽量保持中文。
 
 所以它现在已经适合日常代码、项目修改、文件生成和一些开发任务。
 
-当然，它不是万能替代品。computer-use、connector、app tools 这类依赖 OpenAI 宿主授权的能力，目前不承诺完全等价。
+当然，它不是万能替代品。普通 skills 尽量复用，但 computer-use、connector、app tools 这类依赖 OpenAI 宿主授权的能力，目前不承诺完全等价。
 
 但如果你想要一个“保留 Codex 手感，同时跑 DeepSeek”的 macOS 补丁，DeepCodex 就是这个东西。
 
@@ -117,7 +118,7 @@ DeepCodex 走 DeepSeek 路线。
 
 有自己的 logo，可以和原版 Codex 双开。
 
-中间有一层 translator，负责兼容 Codex 的工具调用、上下文压缩、推理内容和模型路由。
+中间有一层 translator，负责兼容 Codex 的工具调用、上下文压缩、推理内容、插件 skills 和模型路由。
 
 日常写代码、改项目已经能跑。
 
@@ -130,6 +131,7 @@ DeepCodex 走 DeepSeek 路线。
 - GitHub README 顶部 logo
 - 首次 setup 输入 DeepSeek API key
 - DeepCodex 主界面里发起代码任务
+- 插件 / skills 列表或触发工作流的画面
 - 文件修改或项目生成过程
 - translator 架构图
 - README “已知边界”部分
@@ -142,7 +144,7 @@ DeepCodex 走 DeepSeek 路线。
 - 本地 translator 自动接管路由
 - 不只是换 base URL
 - 兼容 tool calls / compaction / reasoning
+- 复用 Codex 插件和 skills
 - 保留 Codex Desktop 手感
 - macOS 版已发布
 - Non-commercial use only
-
