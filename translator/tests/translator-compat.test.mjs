@@ -1,14 +1,17 @@
 /**
  * translator-compat.test.mjs — Compatibility rules for adaptive translator
  *
- * Uses a real Codex request fixture (logs.id=174647) to verify that
- * tool classification & translation-plan generation matches the
- * desired compatibility rules for the DeepSeek V4 backend.
+ * Optionally uses a local captured Codex request fixture to verify that
+ * tool classification & translation-plan generation matches the desired
+ * compatibility rules for the DeepSeek V4 backend.
+ *
+ * The captured fixture is intentionally not published because it can contain
+ * local paths, prompts, and conversation context.
  */
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,14 +30,16 @@ import {
 
 function loadFixture(name) {
   const path = resolve(__dirname, "fixtures", name);
+  if (!existsSync(path)) return null;
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
 const fixture = loadFixture("codex-request-174647.json");
+const compatTest = fixture ? test : test.skip;
 
 // ── sanity checks ─────────────────────────────────────────────────────
 
-test("fixture is a valid Responses API request", () => {
+compatTest("fixture is a valid Responses API request", () => {
   assert.equal(typeof fixture, "object");
   assert.equal(fixture.model, "gpt-5.5");
   assert.equal(fixture.tool_choice, "auto");
@@ -45,7 +50,7 @@ test("fixture is a valid Responses API request", () => {
 
 // ── tool classification ───────────────────────────────────────────────
 
-test("classifyTool returns correct type for each tool kind", () => {
+compatTest("classifyTool returns correct type for each tool kind", () => {
   const tools = fixture.tools;
 
   // 1. function tool
@@ -109,7 +114,7 @@ test("classifyTool returns correct type for each tool kind", () => {
   });
 });
 
-test("classifyTools classifies all 20 tools correctly", () => {
+compatTest("classifyTools classifies all 20 tools correctly", () => {
   const classified = classifyTools(fixture.tools);
   assert.equal(classified.length, fixture.tools.length);
 
@@ -134,7 +139,7 @@ test("classifyTools classifies all 20 tools correctly", () => {
 
 // ── Rule 1: function tools are local callable ─────────────────────────
 
-test("Rule 1: function tools are classified as local callable", () => {
+compatTest("Rule 1: function tools are classified as local callable", () => {
   const classified = classifyTools(fixture.tools);
   const fns = classified.filter((t) => t.type === "function");
   const functionNames = fns.map((t) => t.name);
@@ -152,7 +157,7 @@ test("Rule 1: function tools are classified as local callable", () => {
 
 // ── Rule 2: custom apply_patch is preserved with metadata ─────────────
 
-test("Rule 2: custom apply_patch is preserved with format metadata", () => {
+compatTest("Rule 2: custom apply_patch is preserved with format metadata", () => {
   const classified = classifyTools(fixture.tools);
   const customTools = classified.filter((t) => t.type === "custom");
 
@@ -179,7 +184,7 @@ test("Rule 2: custom apply_patch is preserved with format metadata", () => {
 
 // ── Rule 3: namespace tools have nested tool recognition ──────────────
 
-test("Rule 3: namespace tools expose nested function tools", () => {
+compatTest("Rule 3: namespace tools expose nested function tools", () => {
   const classified = classifyTools(fixture.tools);
   const namespaces = classified.filter((t) => t.type === "namespace");
 
@@ -205,7 +210,7 @@ test("Rule 3: namespace tools expose nested function tools", () => {
   assert.equal(codexApp.nested[0].type, "function");
 });
 
-test("Rule 3: namespace tools are not treated as a single callable", () => {
+compatTest("Rule 3: namespace tools are not treated as a single callable", () => {
   const classified = classifyTools(fixture.tools);
   const namespaces = classified.filter((t) => t.type === "namespace");
 
@@ -229,7 +234,7 @@ test("Rule 3: namespace tools are not treated as a single callable", () => {
 
 // ── Rule 4: web_search and image_generation are hosted/account-bound ───
 
-test("Rule 4: web_search is classified as hosted/account-bound", () => {
+compatTest("Rule 4: web_search is classified as hosted/account-bound", () => {
   const classified = classifyTools(fixture.tools);
   const hosted = classified.filter((t) => t.type === "hosted");
 
@@ -241,7 +246,7 @@ test("Rule 4: web_search is classified as hosted/account-bound", () => {
   assert.notEqual(webSearch.type, "function");
 });
 
-test("Rule 4: image_generation is classified as hosted/account-bound", () => {
+compatTest("Rule 4: image_generation is classified as hosted/account-bound", () => {
   const classified = classifyTools(fixture.tools);
   const hosted = classified.filter((t) => t.type === "hosted");
 
@@ -253,7 +258,7 @@ test("Rule 4: image_generation is classified as hosted/account-bound", () => {
   assert.notEqual(imgGen.type, "function");
 });
 
-test("Rule 4: hosted tools are not in callable set", () => {
+compatTest("Rule 4: hosted tools are not in callable set", () => {
   const classified = classifyTools(fixture.tools);
   const fns = classified.filter((t) => t.type === "function").map((t) => t.name);
   const hosted = classified.filter((t) => t.type === "hosted").map((t) => t.name);
@@ -271,7 +276,7 @@ test("Rule 4: hosted tools are not in callable set", () => {
 
 // ── Rule 5: tool_choice "none" prevents tool forwarding ──────────────
 
-test("Rule 5: tool_choice 'none' prevents tool forwarding/injection", () => {
+compatTest("Rule 5: tool_choice 'none' prevents tool forwarding/injection", () => {
   // Create a fake request with tool_choice "none"
   const noneRequest = {
     ...fixture,
@@ -291,7 +296,7 @@ test("Rule 5: tool_choice 'none' prevents tool forwarding/injection", () => {
   assert.equal(planAuto.injectInternalTools, true);
 });
 
-test("Rule 5: tool_choice 'none' overrides any tool presence", () => {
+compatTest("Rule 5: tool_choice 'none' overrides any tool presence", () => {
   // Even with many tools, tool_choice=none blocks forwarding
   const noneRequest = {
     ...fixture,
@@ -311,7 +316,7 @@ test("Rule 5: tool_choice 'none' overrides any tool presence", () => {
 
 // ── Rule 6: compact mode does not inject tools ────────────────────────
 
-test("Rule 6: compact mode does not forward or inject tools", () => {
+compatTest("Rule 6: compact mode does not forward or inject tools", () => {
   const plan = generateTranslationPlan(fixture, { compact: true });
   assert.equal(plan.compact, true);
   assert.equal(plan.allowTools, false);
@@ -321,7 +326,7 @@ test("Rule 6: compact mode does not forward or inject tools", () => {
   assert.equal(plan.droppedTools.length, 0);
 });
 
-test("Rule 6: compact vs normal mode differ in tool forwarding", () => {
+compatTest("Rule 6: compact vs normal mode differ in tool forwarding", () => {
   const compactPlan = generateTranslationPlan(fixture, { compact: true });
   const normalPlan = generateTranslationPlan(fixture, { compact: false });
 
@@ -340,7 +345,7 @@ test("Rule 6: compact vs normal mode differ in tool forwarding", () => {
 
 // ── Integration: translation plan uses full fixture ───────────────────
 
-test("translation plan for full fixture drops hosted tools and flattens namespaces", () => {
+compatTest("translation plan for full fixture drops hosted tools and flattens namespaces", () => {
   const plan = generateTranslationPlan(fixture, { compact: false });
 
   // Hosted tools are dropped
@@ -374,7 +379,7 @@ test("translation plan for full fixture drops hosted tools and flattens namespac
   assert.equal(execCmd.type, "function");
 });
 
-test("buildChatToolsWithRouting assembles Chat tools with routing metadata", () => {
+compatTest("buildChatToolsWithRouting assembles Chat tools with routing metadata", () => {
   const { tools, routing } = buildChatToolsWithRouting(fixture, {
     internalTools: [
       {
@@ -411,7 +416,7 @@ test("buildChatToolsWithRouting assembles Chat tools with routing metadata", () 
   assert.equal(patchTool.function.parameters.required[0], "content");
 });
 
-test("buildChatToolsWithRouting honors tool_choice none and compact mode", () => {
+compatTest("buildChatToolsWithRouting honors tool_choice none and compact mode", () => {
   const internalTools = [
     { type: "function", function: { name: "web_search", parameters: { type: "object", properties: {} } } },
   ];
@@ -427,7 +432,7 @@ test("buildChatToolsWithRouting honors tool_choice none and compact mode", () =>
 
 // ── Edge: tool_choice "none" + compact mode coverage ──────────────────
 
-test("compact mode with tool_choice 'none' also yields no tools", () => {
+compatTest("compact mode with tool_choice 'none' also yields no tools", () => {
   // Both compact and tool_choice=none independently disable tools
   const plan1 = generateTranslationPlan({ ...fixture, tool_choice: "none" }, { compact: false });
   const plan2 = generateTranslationPlan(fixture, { compact: true });
@@ -442,7 +447,7 @@ test("compact mode with tool_choice 'none' also yields no tools", () => {
 
 // ── Edge: request with no tools ───────────────────────────────────────
 
-test("request with no tools produces empty summary", () => {
+compatTest("request with no tools produces empty summary", () => {
   const empty = { model: "gpt-5.5", tool_choice: "auto", tools: [], input: "hello" };
   const plan = generateTranslationPlan(empty);
   assert.equal(plan.classification.total, 0);
@@ -455,12 +460,12 @@ test("request with no tools produces empty summary", () => {
 
 // ── Edge: null/undefined tools ────────────────────────────────────────
 
-test("null tools does not crash classification", () => {
+compatTest("null tools does not crash classification", () => {
   const classified = classifyTools(null);
   assert.deepEqual(classified, []);
 });
 
-test("undefined tool does not crash classifyTool", () => {
+compatTest("undefined tool does not crash classifyTool", () => {
   assert.deepEqual(classifyTool(undefined), { type: "unknown", name: "", metadata: {} });
   assert.deepEqual(classifyTool(null), { type: "unknown", name: "", metadata: {} });
 });
@@ -469,7 +474,7 @@ test("undefined tool does not crash classifyTool", () => {
 // buildChatToolsWithRouting integration tests (fixture-based)
 // ──────────────────────────────────────────────────────────────────
 
-test("buildChatToolsWithRouting produces Chat-format tools from fixture", () => {
+compatTest("buildChatToolsWithRouting produces Chat-format tools from fixture", () => {
   const { tools, routing } = buildChatToolsWithRouting(fixture);
 
   assert.ok(Array.isArray(tools), "tools is an array");
@@ -496,7 +501,7 @@ test("buildChatToolsWithRouting produces Chat-format tools from fixture", () => 
   assert.ok(toolNames.includes("apply_patch"), "apply_patch forwarded");
 });
 
-test("buildChatToolsWithRouting routing metadata maps chat names back to Codex callable names", () => {
+compatTest("buildChatToolsWithRouting routing metadata maps chat names back to Codex callable names", () => {
   const { tools, routing } = buildChatToolsWithRouting(fixture);
 
   // Function tool: identity mapping
@@ -535,7 +540,7 @@ test("buildChatToolsWithRouting routing metadata maps chat names back to Codex c
   assert.equal(patchRoute.formatSyntax, "lark");
 });
 
-test("buildChatToolsWithRouting custom apply_patch has argument handling notes", () => {
+compatTest("buildChatToolsWithRouting custom apply_patch has argument handling notes", () => {
   const { tools } = buildChatToolsWithRouting(fixture);
   const patch = tools.find((t) => t.function.name === "apply_patch");
   assert.ok(patch, "apply_patch tool present");
@@ -549,7 +554,7 @@ test("buildChatToolsWithRouting custom apply_patch has argument handling notes",
   assert.ok(patch.function.parameters.required.includes("content"), "content is required");
 });
 
-test("buildChatToolsWithRouting namespace names are collision-safe", () => {
+compatTest("buildChatToolsWithRouting namespace names are collision-safe", () => {
   const { tools, routing } = buildChatToolsWithRouting(fixture);
 
   // All chat names must be unique
@@ -566,7 +571,7 @@ test("buildChatToolsWithRouting namespace names are collision-safe", () => {
   }
 });
 
-test("buildChatToolsWithRouting tool_choice none yields empty tools and empty routing", () => {
+compatTest("buildChatToolsWithRouting tool_choice none yields empty tools and empty routing", () => {
   const noneFixture = { ...fixture, tool_choice: "none" };
   const { tools, routing } = buildChatToolsWithRouting(noneFixture);
 
@@ -574,14 +579,14 @@ test("buildChatToolsWithRouting tool_choice none yields empty tools and empty ro
   assert.equal(Object.keys(routing).length, 0, "empty routing when tool_choice=none");
 });
 
-test("buildChatToolsWithRouting compact mode yields empty tools and empty routing", () => {
+compatTest("buildChatToolsWithRouting compact mode yields empty tools and empty routing", () => {
   const { tools, routing } = buildChatToolsWithRouting(fixture, { compact: true });
 
   assert.equal(tools.length, 0, "no tools forwarded in compact mode");
   assert.equal(Object.keys(routing).length, 0, "empty routing in compact mode");
 });
 
-test("buildChatToolsWithRouting empty tool list with injectInternalTools forwards internal tools", () => {
+compatTest("buildChatToolsWithRouting empty tool list with injectInternalTools forwards internal tools", () => {
   const emptyFixture = { model: "gpt-5.5", tool_choice: "auto", tools: [], input: "hello" };
   const internalDefs = [
     { type: "function", function: { name: "web_search", description: "internal search" } },
@@ -597,7 +602,7 @@ test("buildChatToolsWithRouting empty tool list with injectInternalTools forward
   assert.equal(Object.keys(routing).length, 0, "no routing for internal-only tools");
 });
 
-test("buildChatToolsWithRouting no request tools + no internal tools yields empty", () => {
+compatTest("buildChatToolsWithRouting no request tools + no internal tools yields empty", () => {
   const emptyFixture = { model: "gpt-5.5", tool_choice: "auto", tools: [], input: "hello" };
   const { tools, routing } = buildChatToolsWithRouting(emptyFixture);
 
@@ -607,7 +612,7 @@ test("buildChatToolsWithRouting no request tools + no internal tools yields empt
 
 // ── Reverse-mapping simulation (chatToResponsesFormat behavior) ──
 
-test("routing reverse-maps namespace-flattened Chat tool call back to original Codex name", () => {
+compatTest("routing reverse-maps namespace-flattened Chat tool call back to original Codex name", () => {
   const { routing } = buildChatToolsWithRouting(fixture);
 
   // Simulate upstream returning tool call with chat name mcp__node_repl__js
@@ -629,7 +634,7 @@ test("routing reverse-maps namespace-flattened Chat tool call back to original C
   assert.equal(mapped[2].name, "js_reset", "mcp__node_repl__js_reset → js_reset");
 });
 
-test("routing records namespace aliases for tool_choice mapping", () => {
+compatTest("routing records namespace aliases for tool_choice mapping", () => {
   const { tools, routing } = buildChatToolsWithRouting(fixture);
   const toolNames = tools.map((tool) => tool.function.name);
 
@@ -639,7 +644,7 @@ test("routing records namespace aliases for tool_choice mapping", () => {
   assert.equal(routing.js.aliasOnly, true, "alias entry is marked as alias-only");
 });
 
-test("routing unwraps custom tool arguments from content wrapper", () => {
+compatTest("routing unwraps custom tool arguments from content wrapper", () => {
   const { routing } = buildChatToolsWithRouting(fixture);
 
   // Simulate upstream returning a custom tool call with wrapped arguments
@@ -669,7 +674,7 @@ test("routing unwraps custom tool arguments from content wrapper", () => {
   assert.ok(!args.startsWith("{"), "unwrapped content is not JSON");
 });
 
-test("routing unknown tool call name passes through unchanged", () => {
+compatTest("routing unknown tool call name passes through unchanged", () => {
   const { routing } = buildChatToolsWithRouting(fixture);
 
   // A name not in routing passes through as-is
