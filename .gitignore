@@ -1,0 +1,35 @@
+.DS_Store
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+__pycache__/
+node_modules/
+
+# Local secrets and runtime state
+.deepcodex.env
+.deepcodex-setup.log
+.deepcodex-setup-last.log
+.adaptive-translator.log
+
+# Generated release/runtime payload inside the app bundle
+deepcodex.app/Contents/Resources/runtime/
+deepcodex.app/Contents/MacOS/CodexDeepSeekLauncher
+deepcodex.app/Contents/MacOS/DeepCodexLauncher
+!deepcodex.app/Contents/MacOS/.gitkeep
+
+# Local Codex/deepcodex state. Keep only the default templates required by installer.
+codex-home-deepseek-app/*
+!codex-home-deepseek-app/
+!codex-home-deepseek-app/config.adaptive-oneapi.toml
+!codex-home-deepseek-app/deepseek-model-catalog.json
+
+# Local working artifacts, backups, and drafts
+archive/
+research/
+steam-2026-ppt/
+videos/
+PRODUCT.md
+
+# Captured local request fixtures may contain absolute paths or conversation data.
+translator/tests/fixtures/codex-request-*.json

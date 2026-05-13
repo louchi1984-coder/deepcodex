@@ -1,0 +1,18 @@
+{
+  "model": "gpt-5.5",
+  "stream": false,
+  "store": false,
+  "tool_choice": "none",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "请压缩这段工程对话用于未来继续工作，不要回答原始任务。项目正式名 deepcodex。当前架构：deepcodex.app -> translator/adaptive-server.mjs :8282 -> DeepSeek API。已移除 dokobot 和 Chrome 插件链路，web_search/web_fetch 现在只走 urllib 本地脚本。tool_calls 规则：web_search/web_fetch 由翻译层执行并回灌 DeepSeek；其他任何工具调用不执行不丢，透传给 Codex。compact 请求由翻译层稳定包装为 Codex 需要的 context_compaction；DeepSeek 只负责生成摘要文本，并会收到明确的 compact handoff 指令，避免返回“已理解”这类普通聊天回复。用户偏好：不要 Docker、不要 Go、不要 one-api 默认、依赖安装到项目内，不要全局污染。下一步：验证 compact 是否保留这些事实。"
+        }
+      ]
+    }
+  ]
+}
