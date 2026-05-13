@@ -132,6 +132,11 @@ function buildSystemBlock() {
     const caps = p.capabilities || {};
     const lines = [];
 
+    lines.push("Language rule:");
+    lines.push("- If the user writes in Chinese or the conversation is predominantly Chinese, use Simplified Chinese for user-visible answers, exposed reasoning/status text, and progress narration.");
+    lines.push("- Keep code identifiers, command names, file paths, API names, and quoted source text in their original language.");
+    lines.push("");
+
     lines.push(`You are running through ${name}.`);
 
     // Capability summary
