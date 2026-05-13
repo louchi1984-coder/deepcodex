@@ -1,4 +1,12 @@
-# deepcodex
+<p align="center">
+  <img src="assets/codex-deepseek-icon-final.png" alt="deepcodex logo" width="120">
+</p>
+
+<h1 align="center">deepcodex</h1>
+
+<p align="center">
+  Codex Desktop + DeepSeek route patch
+</p>
 
 把 Codex Desktop 接到 DeepSeek 上的轻量补丁。
 
