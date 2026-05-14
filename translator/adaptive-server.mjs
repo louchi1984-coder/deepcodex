@@ -842,14 +842,34 @@ async function callUpstreamWithInternalTools(body) {
     const working = { ...body, stream: false, messages: [...(body.messages || [])] };
     const executedInternalCalls = new Set();
 
+    const toolLoopReasonText = (reason) => {
+        if (reason === "repeated_internal_tool_call") return "模型重复请求了同一个内部工具";
+        if (reason === "internal_tool_loop_limit") return "内部工具调用次数已达到上限";
+        return "内部工具调用已停止";
+    };
+
+    const toolResultSummary = () => {
+        const results = (working.messages || [])
+            .filter(message => message?.role === "tool")
+            .slice(-4)
+            .map((message, index) => {
+                const content = clipForLog(message.content || "", 1200);
+                return `工具结果 ${index + 1} (${message.tool_call_id || "unknown"}): ${content}`;
+            })
+            .join("\n\n");
+        return results || "没有可用的工具结果。";
+    };
+
     const finalizeWithoutTools = async (reason) => {
+        const reasonText = toolLoopReasonText(reason);
         const finalBody = {
             ...working,
             tools: undefined,
             tool_choice: "none",
             messages: [
-                { role: "system", content: `Stop calling tools now. Use the tool results already present in the conversation to answer the user. Reason: ${reason}` },
+                { role: "system", content: `Internal web tool use has been stopped: ${reasonText}. You must now answer the user directly from the existing tool messages. Do not call web_search, web_fetch, or emit DSML/tool markup. If the evidence is insufficient, say what is missing in natural language.` },
                 ...(working.messages || []),
+                { role: "user", content: `工具调用已结束。请直接根据上面的 tool 结果回答我，不要再次请求 web_search/web_fetch，也不要输出 DSML/tool_calls 标记。如果证据不足，请用自然语言说明缺少什么。` },
             ],
             stream: false,
         };
@@ -857,9 +877,21 @@ async function callUpstreamWithInternalTools(body) {
         if (res.ok && json) {
             const content = extractAssistantText(json);
             const pseudoCalls = parsePseudoToolCalls(content);
-            if (pseudoCalls.length === 0) return { ok: true, status: res.status, json };
+            const msg = json.choices?.[0]?.message || {};
+            const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+            if (pseudoCalls.length === 0 && toolCalls.length === 0 && String(content || "").trim()) {
+                return { ok: true, status: res.status, json };
+            }
         }
-        return { ok: true, status: 200, json: makeTextCompletion(working.model, `Tool use stopped because ${reason}. Based on the tool results already collected, provide the best possible answer. If important evidence is missing, say exactly what is missing instead of requesting more tools.`) };
+        const fallback = [
+            `${reasonText}，DeepCodex 已停止继续调用工具，避免陷入重复循环。`,
+            "",
+            "已有工具结果摘要：",
+            toolResultSummary(),
+            "",
+            "模型没有基于这些结果完成最终总结。请重试一个更具体的问题，或直接提供要抓取的 URL。",
+        ].join("\n");
+        return { ok: true, status: 200, json: makeTextCompletion(working.model, fallback) };
     };
 
     for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
@@ -893,7 +925,7 @@ async function callUpstreamWithInternalTools(body) {
             return executedInternalCalls.has(key);
         });
         if (repeated) {
-            return finalizeWithoutTools("the model repeated the same internal tool call");
+            return finalizeWithoutTools("repeated_internal_tool_call");
         }
 
         // Execute internal tools
@@ -918,7 +950,7 @@ async function callUpstreamWithInternalTools(body) {
         }
     }
 
-    return finalizeWithoutTools("internal tool loop limit reached");
+    return finalizeWithoutTools("internal_tool_loop_limit");
 }
 
 function makeTextCompletion(model, content) {

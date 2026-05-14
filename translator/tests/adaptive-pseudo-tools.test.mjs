@@ -545,6 +545,72 @@ test("internal tool execution exceptions are converted into tool failure message
   }
 });
 
+test("repeated internal tool calls finalize without leaking internal English prompt", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async (_url, options) => {
+    upstreamCalls += 1;
+    const body = JSON.parse(options.body);
+    if (upstreamCalls <= 2) {
+      return new Response(JSON.stringify({
+        id: `chatcmpl_repeat_${upstreamCalls}`,
+        object: "chat.completion",
+        created: upstreamCalls,
+        model: "deepseek-v4-pro",
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: `call_search_${upstreamCalls}`,
+              type: "function",
+              function: { name: "web_search", arguments: "{\"query\":\"Steam 2026\"}" },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+
+    assert.equal(body.tool_choice, "none");
+    assert.equal(body.tools, undefined);
+    assert.match(body.messages.at(-1).content, /不要再次请求 web_search\/web_fetch/);
+    return new Response(JSON.stringify({
+      id: "chatcmpl_repeat_finalize",
+      object: "chat.completion",
+      created: 3,
+      model: "deepseek-v4-pro",
+      choices: [{
+        index: 0,
+        message: { role: "assistant", content: "" },
+        finish_reason: "stop",
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  const originalTool = globalThis.__DEEPCODEX_TEST_EXEC_INTERNAL_TOOL__;
+  globalThis.__DEEPCODEX_TEST_EXEC_INTERNAL_TOOL__ = async () => JSON.stringify({
+    ok: true,
+    results: [{ title: "Steam 2026", url: "https://example.com/steam", snippet: "Valve news" }],
+  });
+  try {
+    const result = await callUpstreamWithInternalTools({
+      model: "deepseek-v4-pro",
+      messages: [{ role: "user", content: "搜 Steam 2026" }],
+      tools: [{ type: "function", function: { name: "web_search" } }],
+    });
+    const content = result.json.choices[0].message.content;
+    assert.match(content, /模型重复请求了同一个内部工具/);
+    assert.match(content, /Steam 2026/);
+    assert.doesNotMatch(content, /Tool use stopped because/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalTool === undefined) delete globalThis.__DEEPCODEX_TEST_EXEC_INTERNAL_TOOL__;
+    else globalThis.__DEEPCODEX_TEST_EXEC_INTERNAL_TOOL__ = originalTool;
+  }
+});
+
 test("final Responses formatting never emits internal pseudo DSML as text", () => {
   const formatted = chatToResponsesFormat({
     id: "chatcmpl_final_dsml",
