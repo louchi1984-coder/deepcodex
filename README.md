@@ -48,41 +48,33 @@ Prerequisite: install **Codex Desktop** first. deepcodex will automatically loca
 
 macOS:
 
-```bash
-./scripts/install-deepcodex-app.sh
-```
+1. Download `deepcodex-macos-2026.05.14.dmg` from the GitHub Release
+2. Open the DMG and drag `DeepCodex.app` to `Applications`
+3. Open `DeepCodex`
+4. Enter your DeepSeek API key
 
 Windows beta:
 
 1. Download `deepcodex-windows.zip`
 2. Unzip it
 3. Double-click `install-windows.bat`
+4. Open `DeepCodex` from the desktop shortcut or Start menu
+5. Enter your DeepSeek API key
 
-然后：
-
-1. 打开 `/Applications/deepcodex.app`
-2. 输入 DeepSeek API key
-3. 开始使用
-
-Then:
-
-1. Open `/Applications/deepcodex.app`
-2. Enter your DeepSeek API key
-3. Start using DeepCodex
-
-The first-run setup UI follows your macOS/browser language: Simplified Chinese for `zh*` locales, English otherwise.
+The first-run setup UI follows your system/browser language where available: Simplified Chinese for `zh*` locales, English otherwise.
 
 ---
 
 ## 这版能做什么
 
 - 以独立 app 形式启动：`/Applications/deepcodex.app`
+- Windows beta 以 `DeepCodex.exe` 和快捷方式启动
 - 首次输入 DeepSeek API key，之后直接进入 deepcodex
 - 把 Codex 的模型请求转到 DeepSeek
 - 保留 Codex 适合写代码、改项目、做日常开发的交互方式
 - 使用独立工作区 / 独立状态目录，避免和原版 Codex 完全混在一起
 
-对大多数文本、代码、项目修改类任务来说，这版已经能稳定工作。
+对大多数文本、代码、项目修改类任务来说，macOS 版已经能稳定工作；Windows 版目前是 beta / preview。
 
 ---
 
@@ -129,7 +121,7 @@ deepcodex 现在**不是**：
 ## 工作方式
 
 ```text
-deepcodex.app
+deepcodex app / DeepCodex.exe
   -> local launcher
   -> local translator (:8282)
   -> DeepSeek API
@@ -137,7 +129,7 @@ deepcodex.app
 
 运行时大致分三层：
 
-- **deepcodex.app**
+- **deepcodex app**
   - 独立图标
   - 独立首次 setup
   - 独立启动入口
@@ -156,11 +148,20 @@ deepcodex.app
 
 ### macOS
 
+推荐使用 GitHub Release 里的 DMG：
+
+1. 下载 `deepcodex-macos-2026.05.14.dmg`
+2. 打开 DMG
+3. 把 `DeepCodex.app` 拖到 `Applications`
+4. 从“应用程序”里打开 `DeepCodex`
+
+从源码安装时使用：
+
 ```bash
 ./scripts/install-deepcodex-app.sh
 ```
 
-安装完成后会得到：
+源码安装完成后会得到：
 
 ```text
 /Applications/deepcodex.app
@@ -246,7 +247,10 @@ open -n -a "Codex"
 ## 关键目录
 
 - `/Applications/deepcodex.app`
-  - 已安装 app
+  - macOS 已安装 app
+
+- `%LOCALAPPDATA%\deepcodex\DeepCodex.exe`
+  - Windows beta 运行入口
 
 - `translator/adaptive-server.mjs`
   - translator 主入口
@@ -255,7 +259,10 @@ open -n -a "Codex"
   - 启动链主脚本
 
 - `~/Library/Application Support/deepcodex/`
-  - deepcodex 运行时状态目录
+  - macOS 运行时状态目录
+
+- `%LOCALAPPDATA%\deepcodex`
+  - Windows beta 安装与运行时目录
 
 ---
 
