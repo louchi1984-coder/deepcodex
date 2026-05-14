@@ -11,19 +11,52 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+function pythonCandidates() {
+    const configured = String(process.env.PYTHON_BIN || "").trim();
+    const defaults = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
+    return [...new Set([configured, ...defaults].filter(Boolean))];
+}
+
 function execPython(script, args, timeoutMs = 25_000) {
     const scriptPath = resolve(__dirname, script);
+    const candidates = pythonCandidates();
     return new Promise((resolve) => {
-        const child = execFile("python3", [scriptPath, ...args], {
-            timeout: timeoutMs,
-            maxBuffer: 2 * 1024 * 1024,
-        }, (error, stdout, stderr) => {
-            const text = String(stdout || "").trim();
-            if (text) { resolve(text); return; }
-            resolve(JSON.stringify({ ok: false, error: error?.message || "no output", stderr: String(stderr || "").slice(0, 500) }));
-        });
-        child.stdin?.end();
+        let index = 0;
+        const errors = [];
+        const tryNext = () => {
+            const bin = candidates[index++];
+            if (!bin) {
+                resolve(JSON.stringify({
+                    ok: false,
+                    error: "python runtime unavailable",
+                    attempts: errors,
+                }));
+                return;
+            }
+            const child = execFile(bin, [scriptPath, ...args], {
+                timeout: timeoutMs,
+                maxBuffer: 2 * 1024 * 1024,
+            }, (error, stdout, stderr) => {
+                const text = String(stdout || "").trim();
+                if (text) { resolve(text); return; }
+                errors.push({
+                    bin,
+                    error: error?.message || "no output",
+                    stderr: String(stderr || "").slice(0, 500),
+                });
+                tryNext();
+            });
+            child.stdin?.end();
+        };
+        tryNext();
     });
+}
+
+export function internalToolRuntimeInfo() {
+    return {
+        platform: process.platform,
+        pythonCandidates: pythonCandidates(),
+    };
 }
 
 function roleEnabled(profile, role) {
