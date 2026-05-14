@@ -20,6 +20,7 @@ PROVIDER_PROFILE_PATH="${DEEPCODEX_PROVIDER_PROFILE:-$CODEX_HOME_DIR/provider-pr
 GLOBAL_CODEX_HOME="${GLOBAL_CODEX_HOME:-$HOME/.codex}"
 SHARED_CONFIG_SYNC="$ROOT/scripts/sync-shared-codex-config.mjs"
 PLUGIN_HOST_SYNC_SCRIPT="$ROOT/scripts/sync-shared-codex-plugin-host.mjs"
+SIDECAR_SYNC_SCRIPT="$ROOT/scripts/sync-shared-codex-sidecars.mjs"
 CONFIG_TEMPLATE_PATH="${DEEPCODEX_CONFIG_TEMPLATE:-$ROOT/codex-home-deepseek-app/config.adaptive-oneapi.toml}"
 MODEL_CATALOG_TEMPLATE_PATH="${DEEPCODEX_MODEL_CATALOG_TEMPLATE:-$ROOT/codex-home-deepseek-app/deepseek-model-catalog.json}"
 TRANSLATOR_WATCH_SCRIPT="$ROOT/scripts/deepcodex-translator-watch.sh"
@@ -413,6 +414,9 @@ NODE
 
 if [ -f "$GLOBAL_CODEX_HOME/config.toml" ]; then
   "$NODE_BIN" "$SHARED_CONFIG_SYNC" "$GLOBAL_CODEX_HOME/config.toml" "$CODEX_HOME_DIR/config.toml"
+fi
+if [ -f "$SIDECAR_SYNC_SCRIPT" ]; then
+  "$NODE_BIN" "$SIDECAR_SYNC_SCRIPT" "$GLOBAL_CODEX_HOME" "$CODEX_HOME_DIR" "$GLOBAL_CODEX_HOME/config.toml" "$CODEX_HOME_DIR/config.toml" >/dev/null 2>&1 || true
 fi
 
 if [ -n "$PREVIOUS_CONFIG_FILE" ] && [ -f "$PREVIOUS_CONFIG_FILE" ]; then

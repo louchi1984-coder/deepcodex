@@ -8,6 +8,7 @@ const sharedCodexHome = process.argv[3] || path.join(os.homedir(), '.codex');
 const backupRoot = path.join(codexHome, '.patch-backups', 'shared-plugin-host');
 
 const mappings = [
+  ['skills', path.join(sharedCodexHome, 'skills')],
   ['plugins', path.join(sharedCodexHome, 'plugins')],
   [path.join('.tmp', 'plugins'), path.join(sharedCodexHome, '.tmp', 'plugins')],
   [path.join('cache', 'codex_apps_tools'), path.join(sharedCodexHome, 'cache', 'codex_apps_tools')],
