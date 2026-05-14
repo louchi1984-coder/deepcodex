@@ -28,9 +28,9 @@ Lightweight desktop patch that routes Codex Desktop through DeepSeek while keepi
 > Personal, research, and non-commercial use only.  
 > **Commercial use, resale, hosted services, paid integrations, and commercial redistribution are not allowed.**
 
-## 反馈与联系
+## 获取教程 / 更新 / 反馈
 
-使用中遇到任何问题，可以到抖音 / 视频号联系：
+想看安装教程、使用演示、更新说明，或使用中遇到问题，可以到抖音 / 视频号关注并联系：
 
 ```text
 @娄老师说的对
