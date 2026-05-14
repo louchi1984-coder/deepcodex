@@ -235,6 +235,30 @@ function stripPseudoToolMarkup(content) {
         .trim();
 }
 
+function clipForPrompt(value, limit = 2000) {
+    let text = "";
+    try {
+        text = typeof value === "string" ? value : JSON.stringify(value);
+    } catch {
+        text = String(value || "");
+    }
+    if (text.length <= limit) return text;
+    return `${text.slice(0, limit)}...[truncated ${text.length - limit} chars]`;
+}
+
+function unknownInputItemText(item) {
+    if (!item || typeof item !== "object") return "";
+    const type = String(item.type || "unknown");
+    const safe = { ...item };
+    for (const key of ["data", "image", "image_url", "screenshot", "screenshot_bytes", "encrypted_content"]) {
+        if (safe[key]) safe[key] = `[${key} omitted]`;
+    }
+    return [
+        `Previous Codex input item (${type}) was preserved by the translator as text because this route has no native mapping for that item type.`,
+        clipForPrompt(safe),
+    ].join("\n");
+}
+
 function parsePseudoToolCalls(content) {
     const text = String(content || "");
     if (!text.includes("tool_calls") && !text.includes("invoke")) return [];
@@ -402,6 +426,13 @@ function responsesToChatBody(parsed, options = {}) {
                 else if (item.type === "function_call_output") { ensureF(); activeReasoning = ""; const callId = item.call_id || item.id || ""; const tc = typeof item.output === "string" ? item.output : JSON.stringify(item.output); messages.push({ role: "tool", tool_call_id: callId, content: tc }); }
                 else if (item.type === "context_compaction") { ensureF(); flushD(); activeReasoning = ""; const text = readableCompactionText(item); if (text) messages.push({ role: "system", content: `Previous Codex context compaction:\n${text}` }); }
                 else if (item.type === "reasoning") { activeReasoning = PROFILE?.capabilities?.reasoningReplay === false ? "" : readableReasoningText(item); }
+                else {
+                    ensureF();
+                    flushD();
+                    activeReasoning = "";
+                    const text = unknownInputItemText(item);
+                    if (text) messages.push({ role: "system", content: text });
+                }
             }
         }
         ensureF(); flushD();
@@ -527,6 +558,45 @@ function mapUsage(usage) {
             reasoning_tokens: Number(usage.completion_tokens_details?.reasoning_tokens || 0),
         },
         total_tokens: total,
+    };
+}
+
+function estimateInputTokens(parsed) {
+    const text = clipForPrompt(parsed, 1_000_000);
+    // Conservative local estimate: Codex only needs a stable shape here;
+    // upstream-specific tokenization is not available inside the translator.
+    return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function inputTokensResponse(parsed) {
+    const inputTokens = estimateInputTokens(parsed);
+    return {
+        object: "response.input_tokens",
+        input_tokens: inputTokens,
+        input_tokens_details: { cached_tokens: 0 },
+    };
+}
+
+function emptyInputItemsResponse() {
+    return {
+        object: "list",
+        data: [],
+        first_id: null,
+        last_id: null,
+        has_more: false,
+    };
+}
+
+function cancelledResponse(id) {
+    return {
+        id: id || responseId(),
+        object: "response",
+        created_at: Math.floor(Date.now() / 1000),
+        status: "cancelled",
+        error: null,
+        incomplete_details: null,
+        output: [],
+        usage: null,
     };
 }
 
@@ -798,6 +868,7 @@ function pipeSSE(res, fmt) {
     const sse = (ev, d) => res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`);
     const inProg = { ...fmt, status: "in_progress", output: [] };
     sse("response.created", { type: "response.created", response: inProg });
+    sse("response.in_progress", { type: "response.in_progress", response: inProg });
     let idx = 0;
     for (const item of fmt.output || []) {
         if (item.type === "message") {
@@ -1133,6 +1204,32 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ object: "list", data: models.map(id => ({ id, object: "model", created: 1770000000, owned_by: "codex-adaptive" })) }));
     }
 
+    if (req.method === "POST" && (url.pathname === "/responses/input_tokens" || url.pathname === "/v1/responses/input_tokens")) {
+        try {
+            const raw = await readRaw(req);
+            let parsed = {};
+            if (raw.length > 0) {
+                try { parsed = JSON.parse(raw.toString("utf8")); } catch { return fail(res, 400, "Invalid JSON"); }
+            }
+            res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+            return res.end(JSON.stringify(inputTokensResponse(parsed)));
+        } catch (e) {
+            return fail(res, 500, e.message);
+        }
+    }
+
+    const responseItemMatch = url.pathname.match(/^\/(?:v1\/)?responses\/([^/]+)\/input_items$/);
+    if (req.method === "GET" && responseItemMatch) {
+        res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+        return res.end(JSON.stringify(emptyInputItemsResponse()));
+    }
+
+    const responseCancelMatch = url.pathname.match(/^\/(?:v1\/)?responses\/([^/]+)\/cancel$/);
+    if (req.method === "POST" && responseCancelMatch) {
+        res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+        return res.end(JSON.stringify(cancelledResponse(responseCancelMatch[1])));
+    }
+
     if (req.method === "POST" && RESPONSES_PATHS.has(url.pathname)) {
         try {
             req.path = url.pathname;
@@ -1187,4 +1284,4 @@ if (process.env.NODE_ENV !== "test") {
     startup().then(() => server.listen(PORT, HOST, () => console.error(`[adaptive] http://${HOST}:${PORT} → ${UPSTREAM}`)));
 }
 
-export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, MAX_TOOL_LOOPS };
+export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, MAX_TOOL_LOOPS };

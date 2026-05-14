@@ -11,11 +11,13 @@ const {
   chatToCompactResponseFormat,
   chatToResponsesFormat,
   hasPseudoToolMarkup,
+  inputTokensResponse,
   normalizeCompactSummary,
   parsePseudoToolCalls,
   prepareCompactChatBody,
   responsesToChatBody,
   stripPseudoToolMarkup,
+  unknownInputItemText,
 } = await import("../adaptive-server.mjs");
 
 const dsmlFetch = `最后抓一下 163 那篇比较全面的伤亡统计文章，确认乌克兰方面的完整数据：
@@ -93,6 +95,27 @@ test("compact summary normalizer rejects acknowledgements", () => {
 
 test("compact summary normalizer unwraps json and fences", () => {
   assert.equal(normalizeCompactSummary('```json\n{"summary":"具体进展：已完成 translator compact 包装测试。"}\n```'), "具体进展：已完成 translator compact 包装测试。");
+});
+
+test("input token probe returns a stable Responses-compatible shape", () => {
+  const result = inputTokensResponse({ input: "hello" });
+  assert.equal(result.object, "response.input_tokens");
+  assert.equal(typeof result.input_tokens, "number");
+  assert.ok(result.input_tokens > 0);
+  assert.deepEqual(result.input_tokens_details, { cached_tokens: 0 });
+});
+
+test("unknown input items are preserved as bounded system text", () => {
+  const text = unknownInputItemText({
+    type: "computer_call_output",
+    call_id: "call_123",
+    screenshot: "x".repeat(5000),
+    output: "visible result",
+  });
+  assert.match(text, /computer_call_output/);
+  assert.match(text, /visible result/);
+  assert.match(text, /screenshot omitted/);
+  assert.ok(text.length < 2400);
 });
 
 test("chat completions are wrapped with a VibeAround-style Responses shell", () => {

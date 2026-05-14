@@ -394,8 +394,13 @@ if ! curl -fsS "$TRANSLATOR_URL/health" >/dev/null 2>&1; then
 fi
 
 mkdir -p "$CODEX_HOME_DIR" "$ELECTRON_USER_DATA"
+PREVIOUS_CONFIG_FILE=""
 if [ -f "$CODEX_HOME_DIR/config.toml" ] && [ ! -f "$CODEX_HOME_DIR/config.toml.before-adaptive-oneapi" ]; then
   cp "$CODEX_HOME_DIR/config.toml" "$CODEX_HOME_DIR/config.toml.before-adaptive-oneapi"
+fi
+if [ -f "$CODEX_HOME_DIR/config.toml" ]; then
+  PREVIOUS_CONFIG_FILE="$CODEX_HOME_DIR/config.toml.deepcodex-prev.$$"
+  cp "$CODEX_HOME_DIR/config.toml" "$PREVIOUS_CONFIG_FILE"
 fi
 cp "$CODEX_HOME_DIR/config.adaptive-oneapi.toml" "$CODEX_HOME_DIR/config.toml"
 "$NODE_BIN" - "$CODEX_HOME_DIR/config.toml" "$CODEX_HOME_DIR/deepseek-model-catalog.json" <<'NODE'
@@ -408,6 +413,70 @@ NODE
 
 if [ -f "$GLOBAL_CODEX_HOME/config.toml" ]; then
   "$NODE_BIN" "$SHARED_CONFIG_SYNC" "$GLOBAL_CODEX_HOME/config.toml" "$CODEX_HOME_DIR/config.toml"
+fi
+
+if [ -n "$PREVIOUS_CONFIG_FILE" ] && [ -f "$PREVIOUS_CONFIG_FILE" ]; then
+  "$NODE_BIN" - "$CODEX_HOME_DIR/config.toml" "$PREVIOUS_CONFIG_FILE" <<'NODE'
+const fs = require("fs");
+const [targetPath, previousPath] = process.argv.slice(2);
+
+function splitBlocks(text) {
+  const blocks = [];
+  let current = { header: null, lines: [] };
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\[[^\]]+\]\s*$/.test(line)) {
+      blocks.push(current);
+      current = { header: line.trim(), lines: [line] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  blocks.push(current);
+  return blocks;
+}
+
+function render(blocks) {
+  return blocks
+    .map((block) => block.lines.join("\n").replace(/\n+$/g, ""))
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd() + "\n";
+}
+
+function readTopLevelValue(text, key) {
+  const match = text.match(new RegExp(`^${key}\\s*=\\s*(.+)$`, "m"));
+  return match ? match[1].trim() : null;
+}
+
+function setTopLevelValue(text, key, value) {
+  if (!value) return text;
+  const line = `${key} = ${value}`;
+  const re = new RegExp(`^${key}\\s*=.*$`, "m");
+  if (re.test(text)) return text.replace(re, line);
+  const anchor = /^model_reasoning_effort\s*=.*$/m;
+  if (anchor.test(text)) return text.replace(anchor, (m) => `${m}\n${line}`);
+  return `${line}\n${text}`;
+}
+
+const previous = fs.readFileSync(previousPath, "utf8");
+let target = fs.readFileSync(targetPath, "utf8");
+
+for (const key of ["approval_policy", "sandbox_mode", "default_permissions"]) {
+  target = setTopLevelValue(target, key, readTopLevelValue(previous, key));
+}
+
+const previousBlocks = splitBlocks(previous);
+const targetBlocks = splitBlocks(target);
+const preserveBlock = (block) => Boolean(block.header && (
+  /^\[projects\./.test(block.header) ||
+  /^\[permissions\./.test(block.header)
+));
+const preserved = previousBlocks.filter(preserveBlock);
+const kept = targetBlocks.filter((block) => !preserveBlock(block));
+fs.writeFileSync(targetPath, render([...kept, ...preserved]));
+NODE
+  rm -f "$PREVIOUS_CONFIG_FILE"
 fi
 
 # deepcodex should not start the DeepSeek code worker MCP by default.
