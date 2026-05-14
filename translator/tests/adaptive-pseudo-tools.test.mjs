@@ -257,6 +257,14 @@ test("system block includes global macOS permission-sensitive action guidance", 
   assert.match(block, /do not immediately replace a just-started local server/i);
 });
 
+test("system block distinguishes hosted tool limits from internal web tools", () => {
+  const block = buildSystemBlock();
+  assert.match(block, /does NOT support provider-hosted tools/i);
+  assert.match(block, /use the translator-provided internal web_search and web_fetch tools/i);
+  assert.match(block, /Do not say web_search or web_fetch is unavailable/i);
+  assert.doesNotMatch(block, /This route does NOT support: hosted tools/i);
+});
+
 test("stream mapper converts Chat tool_call deltas to Responses function_call events", () => {
   const mapper = new ChatToResponsesStreamMapper({ model: "gpt-5.5", input: "pwd" }, "gpt-5.5");
   const first = mapper.pushChunk({

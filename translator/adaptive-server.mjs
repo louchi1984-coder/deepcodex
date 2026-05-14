@@ -35,9 +35,11 @@ const UPSTREAM = (process.env.UPSTREAM_URL || "https://api.deepseek.com/v1").rep
 const UPSTREAM_KEY = process.env.UPSTREAM_API_KEY || "";
 const PROFILE_PATH = process.env.TRANSLATOR_PROFILE_PATH || "";
 const MAX_TOOL_LOOPS = Number(process.env.TRANSLATOR_MAX_TOOL_LOOPS || 12);
+const DEBUG_UPSTREAM = process.env.DEEPCODEX_DEBUG_UPSTREAM === "1" || process.env.TRANSLATOR_DEBUG_UPSTREAM === "1";
 const RESPONSES_PATHS = new Set(["/responses", "/v1/responses", "/responses/compact", "/v1/responses/compact"]);
 const REASONING_BLOB_PREFIX = "deepcodex.reasoning.hex.v1:";
 const DEEPCODEX_DISPLAY_NAME = process.env.DEEPCODEX_DISPLAY_NAME || "娄老师说的对";
+let DEBUG_REQUEST_SEQ = 0;
 
 const COMPACT_SYSTEM = [
     "You are handling a Codex CONTEXT CHECKPOINT COMPACTION request.",
@@ -139,17 +141,25 @@ function buildSystemBlock() {
 
     lines.push(`You are running through ${name}.`);
 
+    const hasInternalWebTools = !caps.hostedTools && caps.internalWebTools !== false;
+
     // Capability summary
-    const missing = [];
-    if (!caps.hostedTools) missing.push("hosted tools");
-    if (!caps.vision) missing.push("vision / image understanding");
-    if (missing.length > 0) {
-        lines.push(`This route does NOT support: ${missing.join(", ")}.`);
-        lines.push("When a request needs these capabilities, pause the workflow and ask the user to manually take over. Give a concrete handoff instruction.");
+    if (!caps.hostedTools) {
+        lines.push("This route does NOT support provider-hosted tools such as OpenAI web_search_preview.");
+        if (hasInternalWebTools) {
+            lines.push("For web search and URL fetching, use the translator-provided internal web_search and web_fetch tools below.");
+            lines.push("Do not say web_search or web_fetch is unavailable merely because hosted tools are unsupported.");
+        } else {
+            lines.push("No translator-provided web tools are configured. If a request needs web access, pause the workflow and ask the user to manually take over.");
+        }
+    }
+    if (!caps.vision) {
+        lines.push("This route does NOT support vision / image understanding.");
+        lines.push("When a request needs unsupported non-web capabilities, pause the workflow and ask the user to manually take over. Give a concrete handoff instruction.");
     }
 
     // Internal tools available
-    if (!caps.hostedTools && caps.internalWebTools !== false) {
+    if (hasInternalWebTools) {
         const searchChoice = getToolChoiceForRole("web_search", PROFILE);
         const fetchChoice = getToolChoiceForRole("web_fetch", PROFILE);
         const searchDesc = searchChoice?.definition?.function?.description || "Search the web using the translator's local search backend.";
@@ -221,6 +231,110 @@ function normalizeUpstreamBody(body) {
     if (alias) { b = { ...body, model: alias.model }; if (!b.thinking || typeof b.thinking !== "object") b.thinking = { type: alias.thinkingType }; }
     if (!b.thinking || typeof b.thinking !== "object") b = { ...b, thinking: { type: "disabled" } };
     return b;
+}
+
+function clipForLog(value, limit = 500) {
+    let text = "";
+    try {
+        text = typeof value === "string" ? value : JSON.stringify(value);
+    } catch {
+        text = String(value || "");
+    }
+    text = text.replace(/\s+/g, " ").trim();
+    if (text.length <= limit) return text;
+    return `${text.slice(0, limit)}...[truncated ${text.length - limit} chars]`;
+}
+
+function messageContentSummary(content) {
+    if (typeof content === "string") return clipForLog(content);
+    if (Array.isArray(content)) {
+        return content.map((part) => {
+            if (!part || typeof part !== "object") return typeof part;
+            const type = part.type || "part";
+            if (typeof part.text === "string") return `${type}:${clipForLog(part.text, 160)}`;
+            if (part.image_url || part.input_image || part.image) return `${type}:[image omitted]`;
+            return type;
+        }).join(" | ");
+    }
+    if (content === null || content === undefined) return "";
+    return clipForLog(content);
+}
+
+function messageSummary(message) {
+    if (!message || typeof message !== "object") return null;
+    return {
+        role: message.role || null,
+        content: messageContentSummary(message.content),
+        toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls.map(tc => tc?.function?.name || tc?.name || "unknown") : [],
+        toolCallId: message.tool_call_id || null,
+    };
+}
+
+function requestToolNames(tools) {
+    return (tools || []).map((tool) => tool?.function?.name || tool?.name || "unknown");
+}
+
+function requestSummary(body) {
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const tools = Array.isArray(body?.tools) ? body.tools : [];
+    const lastUser = [...messages].reverse().find(message => message?.role === "user");
+    return {
+        model: body?.model,
+        stream: body?.stream,
+        tool_choice: body?.tool_choice,
+        thinking: body?.thinking?.type,
+        tools_count: tools.length,
+        tools: requestToolNames(tools),
+        has_web_search: requestToolNames(tools).includes("web_search"),
+        has_web_fetch: requestToolNames(tools).includes("web_fetch"),
+        messages_count: messages.length,
+        message_roles: messages.map(message => message?.role || "unknown"),
+        message0: messageSummary(messages[0]),
+        last_user: messageSummary(lastUser),
+    };
+}
+
+function responseSummary(status, json, text = "") {
+    const choice = json?.choices?.[0] || {};
+    const msg = choice.message || {};
+    const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    return {
+        status,
+        finish_reason: choice.finish_reason || null,
+        has_tool_calls: toolCalls.length > 0,
+        tool_calls: toolCalls.map(tc => tc?.function?.name || tc?.name || "unknown"),
+        content: messageContentSummary(msg.content),
+        reasoning: typeof msg.reasoning_content === "string" ? clipForLog(msg.reasoning_content, 200) : "",
+        usage: json?.usage || null,
+        raw: json ? "" : clipForLog(text, 500),
+    };
+}
+
+function debugUpstreamRequest(label, body) {
+    if (!DEBUG_UPSTREAM) return null;
+    const id = `${Date.now().toString(36)}-${++DEBUG_REQUEST_SEQ}`;
+    console.error(`[adaptive][upstream][${id}][${label}] request ${JSON.stringify(requestSummary(body))}`);
+    return id;
+}
+
+function debugUpstreamResponse(id, status, json, text) {
+    if (!DEBUG_UPSTREAM || !id) return;
+    console.error(`[adaptive][upstream][${id}] response ${JSON.stringify(responseSummary(status, json, text))}`);
+}
+
+async function postChatCompletion(body, label) {
+    const normalized = normalizeUpstreamBody(body);
+    const debugId = debugUpstreamRequest(label, normalized);
+    const res = await fetch(`${UPSTREAM}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(UPSTREAM_KEY ? { authorization: `Bearer ${UPSTREAM_KEY}` } : {}) },
+        body: JSON.stringify(normalized),
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    debugUpstreamResponse(debugId, res.status, json, text);
+    return { res, text, json };
 }
 
 function hasPseudoToolMarkup(content) {
@@ -739,14 +853,7 @@ async function callUpstreamWithInternalTools(body) {
             ],
             stream: false,
         };
-        const res = await fetch(`${UPSTREAM}/chat/completions`, {
-            method: "POST",
-            headers: { "content-type": "application/json", ...(UPSTREAM_KEY ? { authorization: `Bearer ${UPSTREAM_KEY}` } : {}) },
-            body: JSON.stringify(normalizeUpstreamBody(finalBody)),
-        });
-        const text = await res.text();
-        let json = null;
-        try { json = JSON.parse(text); } catch {}
+        const { res, text, json } = await postChatCompletion(finalBody, "internal-finalize");
         if (res.ok && json) {
             const content = extractAssistantText(json);
             const pseudoCalls = parsePseudoToolCalls(content);
@@ -756,14 +863,7 @@ async function callUpstreamWithInternalTools(body) {
     };
 
     for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
-        const res = await fetch(`${UPSTREAM}/chat/completions`, {
-            method: "POST",
-            headers: { "content-type": "application/json", ...(UPSTREAM_KEY ? { authorization: `Bearer ${UPSTREAM_KEY}` } : {}) },
-            body: JSON.stringify(normalizeUpstreamBody(working)),
-        });
-        const text = await res.text();
-        let json = null;
-        try { json = JSON.parse(text); } catch {}
+        const { res, text, json } = await postChatCompletion(working, `internal-loop-${loop + 1}`);
         if (!res.ok) return { ok: false, status: res.status, json, text };
 
         const msg = json.choices?.[0]?.message || {};
@@ -826,14 +926,7 @@ function makeTextCompletion(model, content) {
 }
 
 async function callUpstreamOnce(body) {
-    const res = await fetch(`${UPSTREAM}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...(UPSTREAM_KEY ? { authorization: `Bearer ${UPSTREAM_KEY}` } : {}) },
-        body: JSON.stringify(normalizeUpstreamBody({ ...body, stream: false })),
-    });
-    const text = await res.text();
-    let json = null;
-    try { json = JSON.parse(text); } catch {}
+    const { res, text, json } = await postChatCompletion({ ...body, stream: false }, "once");
     return res.ok ? { ok: true, status: res.status, json } : { ok: false, status: res.status, json, text };
 }
 
@@ -1118,14 +1211,18 @@ class ChatToResponsesStreamMapper {
 }
 
 async function pipeStreamingChatAsResponses(req, res, body, model, parsed, routing = null) {
+    const upstreamBody = normalizeUpstreamBody({ ...body, stream: true });
+    const debugId = debugUpstreamRequest("native-stream", upstreamBody);
     const upstream = await fetch(`${UPSTREAM}/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json", ...(UPSTREAM_KEY ? { authorization: `Bearer ${UPSTREAM_KEY}` } : {}) },
-        body: JSON.stringify(normalizeUpstreamBody({ ...body, stream: true })),
+        body: JSON.stringify(upstreamBody),
     });
+    debugUpstreamResponse(debugId, upstream.status, null, upstream.ok ? "streaming response opened" : "");
 
     if (!upstream.ok) {
         const text = await upstream.text();
+        debugUpstreamResponse(debugId, upstream.status, null, text);
         return fail(res, upstream.status, text ? text.slice(0, 500) : `Upstream ${upstream.status}`);
     }
 
