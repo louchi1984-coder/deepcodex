@@ -28,6 +28,16 @@ Lightweight desktop patch that routes Codex Desktop through DeepSeek while keepi
 > Personal, research, and non-commercial use only.  
 > **Commercial use, resale, hosted services, paid integrations, and commercial redistribution are not allowed.**
 
+## 反馈与联系
+
+使用中遇到任何问题，可以到抖音 / 视频号联系：
+
+```text
+@娄老师说的对
+```
+
+---
+
 它不重做 IDE，也不重写一整套插件生态。  
 它只做几件关键的事：
 
@@ -241,16 +251,6 @@ open -n -a "Codex"
 原因是 macOS 可能会把正在运行的 Codex 核心进程视为“Codex 已打开”，普通双击原版 Codex 时只聚焦已有实例，而不是再开一个原版实例。
 
 不要手动修改 `/Applications/Codex.app`。deepcodex 是补丁入口，不会改写官方 Codex app。
-
----
-
-## 反馈与联系
-
-使用中遇到任何问题，可以到抖音 / 视频号联系：
-
-```text
-@娄老师说的对
-```
 
 ---
 
