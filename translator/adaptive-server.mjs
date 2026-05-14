@@ -235,6 +235,12 @@ function stripPseudoToolMarkup(content) {
         .trim();
 }
 
+function sanitizeMarkdownUrlFormatting(content) {
+    return String(content || "")
+        .replace(/\*\*([^\n*]{0,12})((?:https?:\/\/|localhost:|127\.0\.0\.1:)[^\s*<>()]+?\/?)\*\*/g, "$1$2")
+        .replace(/`((?:https?:\/\/|localhost:|127\.0\.0\.1:)[^`\s]+?)\/\*\*`/g, "`$1/`");
+}
+
 function clipForPrompt(value, limit = 2000) {
     let text = "";
     try {
@@ -679,7 +685,7 @@ function chatToResponsesFormat(json, original, routing = null) {
     const rawContent = typeof msg.content === "string" ? msg.content : "";
     const pseudoCalls = parsePseudoToolCalls(rawContent);
     const pseudoExternalCalls = pseudoCalls.filter(tc => !isInternalTool(tc?.function?.name));
-    const content = pseudoCalls.length > 0 ? stripPseudoToolMarkup(rawContent) : msg.content;
+    const content = sanitizeMarkdownUrlFormatting(pseudoCalls.length > 0 ? stripPseudoToolMarkup(rawContent) : msg.content);
     if (msg.reasoning_content) output.push({ type: "reasoning", id: reasoningId(), status: "completed", summary: [], encrypted_content: encodeReasoningContent(msg.reasoning_content) });
     if (content) output.push({ type: "message", id: messageId(), role: "assistant", status: "completed", content: [{ type: "output_text", text: content, annotations: [] }] });
     if (msg.tool_calls) for (const tc of msg.tool_calls) {
@@ -1070,7 +1076,7 @@ class ChatToResponsesStreamMapper {
             items.push([this.reasoning.outputIndex, { id: this.reasoning.id, type: "reasoning", status: "completed", summary: [], encrypted_content: encodeReasoningContent(this.reasoning.content) }]);
         }
         if (this.textOutputIndex !== null) {
-            items.push([this.textOutputIndex, { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text: this.text, annotations: [] }] }]);
+            items.push([this.textOutputIndex, { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text: sanitizeMarkdownUrlFormatting(this.text), annotations: [] }] }]);
         }
         for (const tc of this.toolCalls.values()) {
             if (!tc.opened) continue;
@@ -1092,8 +1098,9 @@ class ChatToResponsesStreamMapper {
             }]);
         }
         if (this.textOutputIndex !== null) {
-            const item = { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text: this.text, annotations: [] }] };
-            events.push(["response.output_text.done", { type: "response.output_text.done", item_id: this.messageId, output_index: this.textOutputIndex, content_index: 0, text: this.text }]);
+            const text = sanitizeMarkdownUrlFormatting(this.text);
+            const item = { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] };
+            events.push(["response.output_text.done", { type: "response.output_text.done", item_id: this.messageId, output_index: this.textOutputIndex, content_index: 0, text }]);
             events.push(["response.content_part.done", { type: "response.content_part.done", item_id: this.messageId, output_index: this.textOutputIndex, content_index: 0, part: item.content[0] }]);
             events.push(["response.output_item.done", { type: "response.output_item.done", output_index: this.textOutputIndex, item }]);
         }
@@ -1284,4 +1291,4 @@ if (process.env.NODE_ENV !== "test") {
     startup().then(() => server.listen(PORT, HOST, () => console.error(`[adaptive] http://${HOST}:${PORT} → ${UPSTREAM}`)));
 }
 
-export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, MAX_TOOL_LOOPS };
+export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, MAX_TOOL_LOOPS };

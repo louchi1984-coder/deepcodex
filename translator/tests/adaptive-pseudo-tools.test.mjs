@@ -16,6 +16,7 @@ const {
   parsePseudoToolCalls,
   prepareCompactChatBody,
   responsesToChatBody,
+  sanitizeMarkdownUrlFormatting,
   stripPseudoToolMarkup,
   unknownInputItemText,
 } = await import("../adaptive-server.mjs");
@@ -116,6 +117,17 @@ test("unknown input items are preserved as bounded system text", () => {
   assert.match(text, /visible result/);
   assert.match(text, /screenshot omitted/);
   assert.ok(text.length < 2400);
+});
+
+test("markdown sanitizer unwraps bold local URLs without touching normal text", () => {
+  assert.equal(
+    sanitizeMarkdownUrlFormatting("服务已启动，运行在 **🌐 http://localhost:3000/**，返回 200。"),
+    "服务已启动，运行在 🌐 http://localhost:3000/，返回 200。",
+  );
+  assert.equal(
+    sanitizeMarkdownUrlFormatting("打开 `http://127.0.0.1:8080/**` 测试。"),
+    "打开 `http://127.0.0.1:8080/` 测试。",
+  );
 });
 
 test("chat completions are wrapped with a VibeAround-style Responses shell", () => {
