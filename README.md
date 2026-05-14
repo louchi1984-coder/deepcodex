@@ -10,15 +10,15 @@
 
 把 Codex Desktop 接到 DeepSeek 上的轻量补丁。
 
-Lightweight macOS patch that routes Codex Desktop through DeepSeek while keeping the familiar Codex workflow.
+Lightweight desktop patch that routes Codex Desktop through DeepSeek while keeping the familiar Codex workflow.
 
 > **Platform**
 >  
-> 当前仅支持 **macOS**。  
-> **Windows 版本稍后提供。**
+> **macOS**: 可用。  
+> **Windows**: beta / preview。
 >
-> Currently **macOS only**.  
-> **Windows support will come later.**
+> **macOS**: available.  
+> **Windows**: beta / preview.
 
 > **License / 使用限制**
 >  
@@ -46,9 +46,17 @@ Lightweight macOS patch that routes Codex Desktop through DeepSeek while keeping
 
 Prerequisite: install **Codex Desktop** first. deepcodex will automatically locate the local Codex Desktop app and attach to it.
 
+macOS:
+
 ```bash
 ./scripts/install-deepcodex-app.sh
 ```
+
+Windows beta:
+
+1. Download `deepcodex-windows.zip`
+2. Unzip it
+3. Double-click `install-windows.bat`
 
 然后：
 
@@ -146,6 +154,8 @@ deepcodex.app
 
 ## 安装
 
+### macOS
+
 ```bash
 ./scripts/install-deepcodex-app.sh
 ```
@@ -157,6 +167,42 @@ deepcodex.app
 ```
 
 然后直接从“应用程序”里双击 `deepcodex` 即可。
+
+### Windows beta / preview
+
+前置依赖：请先安装官方 **Codex Desktop for Windows**。
+
+下载 `deepcodex-windows.zip`，解压后双击：
+
+```text
+install-windows.bat
+```
+
+安装位置：
+
+```text
+%LOCALAPPDATA%\deepcodex
+```
+
+运行入口：
+
+```text
+%LOCALAPPDATA%\deepcodex\DeepCodex.exe
+```
+
+安装后也会创建：
+
+- 桌面快捷方式：`DeepCodex.lnk`
+- 开始菜单快捷方式：`DeepCodex\DeepCodex.lnk`
+
+Windows 发布包不包含官方 Codex，也不包含 `codex-patched-app`。  
+安装时会从用户本机已安装的 Codex Desktop 复制并生成 `codex-patched-app`，大小约 `784 MB`。
+
+Windows zip 校验：
+
+```text
+SHA256: 771345ACCDA53216D0E9EB3BC0B58C111208521DBEF833DBB19AF65DFDCB6CED
+```
 
 ---
 
