@@ -9,6 +9,8 @@ if (!sourcePath || !targetPath) {
 }
 
 const sharedSectionRe = /^\[(marketplaces|plugins|mcp_servers)\./;
+const windowsShimCommands = new Set(["npx", "npm", "pnpm", "yarn"]);
+const shouldNormalizeWindowsShims = process.platform === "win32" || process.env.DEEPCODEX_FORCE_WINDOWS_SHIM === "1";
 
 function splitTomlBlocks(text) {
   const blocks = [];
@@ -29,6 +31,55 @@ function splitTomlBlocks(text) {
 
 function isShared(block) {
   return Boolean(block.header && sharedSectionRe.test(block.header));
+}
+
+function parseTomlStringArray(value) {
+  const raw = String(value || "").trim();
+  if (!raw.startsWith("[") || !raw.endsWith("]")) return null;
+  try {
+    return JSON.parse(raw.replace(/'/g, '"'));
+  } catch {
+    return null;
+  }
+}
+
+function renderTomlStringArray(values) {
+  return `[${values.map((value) => JSON.stringify(String(value))).join(", ")}]`;
+}
+
+function normalizeWindowsMcpShim(block) {
+  if (!shouldNormalizeWindowsShims || !block.header?.startsWith("[mcp_servers.")) return block;
+
+  let commandLineIndex = -1;
+  let argsLineIndex = -1;
+  let command = "";
+
+  for (let i = 0; i < block.lines.length; i += 1) {
+    const commandMatch = block.lines[i].match(/^command\s*=\s*"([^"]+)"\s*$/);
+    if (commandMatch) {
+      commandLineIndex = i;
+      command = commandMatch[1].trim().toLowerCase();
+      continue;
+    }
+    if (/^args\s*=/.test(block.lines[i])) argsLineIndex = i;
+  }
+
+  if (!windowsShimCommands.has(command)) return block;
+
+  let args = [];
+  if (argsLineIndex >= 0) {
+    const rawArgs = block.lines[argsLineIndex].replace(/^args\s*=\s*/, "");
+    const parsed = parseTomlStringArray(rawArgs);
+    if (Array.isArray(parsed)) args = parsed;
+  }
+
+  const shim = `${command}.cmd`;
+  const next = { ...block, lines: [...block.lines] };
+  next.lines[commandLineIndex] = `command = "cmd.exe"`;
+  const argsLine = `args = ${renderTomlStringArray(["/d", "/s", "/c", shim, ...args])}`;
+  if (argsLineIndex >= 0) next.lines[argsLineIndex] = argsLine;
+  else next.lines.splice(commandLineIndex + 1, 0, argsLine);
+  return next;
 }
 
 function render(blocks) {
@@ -52,7 +103,7 @@ const source = fs.readFileSync(sourcePath, "utf8");
 const target = fs.readFileSync(targetPath, "utf8");
 const sourceBlocks = splitTomlBlocks(source);
 const targetBlocks = splitTomlBlocks(target);
-const sharedBlocks = sourceBlocks.filter(isShared);
+const sharedBlocks = sourceBlocks.filter(isShared).map(normalizeWindowsMcpShim);
 const keptTargetBlocks = targetBlocks.filter((block) => !isShared(block));
 
 fs.writeFileSync(targetPath, render([...keptTargetBlocks, ...sharedBlocks]));
