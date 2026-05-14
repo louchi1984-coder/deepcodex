@@ -5,6 +5,8 @@
 *.sqlite-wal
 __pycache__/
 node_modules/
+.build/
+dist/
 
 # Local secrets and runtime state
 .deepcodex.env
