@@ -58,14 +58,14 @@ Prerequisite: install **Codex Desktop** first. deepcodex will automatically loca
 
 macOS:
 
-1. Download `deepcodex-macos-2026.05.14.dmg` from the GitHub Release
+1. Download `deepcodex-macos-2026.05.15.dmg` from the GitHub Release
 2. Open the DMG and drag `DeepCodex.app` to `Applications`
 3. Open `DeepCodex`
 4. Enter your DeepSeek API key
 
 Windows beta:
 
-1. Download `deepcodex-windows-v0.1.2-preview.zip`
+1. Download `deepcodex-windows-v0.1.3-preview.zip`
 2. Unzip it
 3. Double-click `install-windows.bat`
 4. Open `DeepCodex` from the desktop shortcut or Start menu
@@ -160,7 +160,7 @@ deepcodex app / DeepCodex.exe
 
 推荐使用 GitHub Release 里的 DMG：
 
-1. 下载 `deepcodex-macos-2026.05.14.dmg`
+1. 下载 `deepcodex-macos-2026.05.15.dmg`
 2. 打开 DMG
 3. 把 `DeepCodex.app` 拖到 `Applications`
 4. 从“应用程序”里打开 `DeepCodex`
@@ -183,7 +183,7 @@ deepcodex app / DeepCodex.exe
 
 前置依赖：请先安装官方 **Codex Desktop for Windows**。
 
-下载 `deepcodex-windows-v0.1.2-preview.zip`，解压后双击：
+下载 `deepcodex-windows-v0.1.3-preview.zip`，解压后双击：
 
 ```text
 install-windows.bat
@@ -212,7 +212,7 @@ Windows 发布包不包含官方 Codex，也不包含 `codex-patched-app`。
 Windows zip 校验：
 
 ```text
-SHA256: D30644AE8A8237BEBA1A28F47A2105D1D0772358D794B6360D3D404B3734EECD
+SHA256: 5878DD3A0CDB7B2F794E9F2ACF675534355020E953C5ABE5F0DEDA7E1B01F736
 ```
 
 ---
