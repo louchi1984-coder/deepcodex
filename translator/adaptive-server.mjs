@@ -212,6 +212,13 @@ function buildSystemBlock() {
     lines.push("- If a permission prompt may be pending, tell the user to click Allow and wait instead of rapidly retrying with alternate commands.");
 
     lines.push("");
+    lines.push("Windows Node command rule:");
+    lines.push("- On Windows, never launch npm, npx, pnpm, or yarn through bare Start-Process -FilePath names.");
+    lines.push("- Use npm.cmd, npx.cmd, pnpm.cmd, or yarn.cmd explicitly; for long-running tools prefer cmd.exe /d /s /c \"npx.cmd ...\".");
+    lines.push("- Do not prepend C:\\Program Files\\nodejs to PATH to find these commands. DeepCodex already provides command shims at the front of PATH.");
+    lines.push("- If an existing command uses Start-Process -FilePath \"npx\" or \"npm\", rewrite it to the .cmd executable before running.");
+
+    lines.push("");
     lines.push("Markdown formatting rule:");
     lines.push("- When showing a URL or local address, prefer plain text or inline code and do not wrap the URL in bold or other decorative Markdown.");
 

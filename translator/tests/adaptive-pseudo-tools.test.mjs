@@ -258,6 +258,14 @@ test("system block includes global macOS permission-sensitive action guidance", 
   assert.match(block, /do not immediately replace a just-started local server/i);
 });
 
+test("system block tells Windows agents to use Node .cmd shims", () => {
+  const block = buildSystemBlock();
+  assert.match(block, /Windows Node command rule:/);
+  assert.match(block, /npx\.cmd/);
+  assert.match(block, /Start-Process -FilePath "npx"/);
+  assert.match(block, /Do not prepend C:\\Program Files\\nodejs to PATH/);
+});
+
 test("system block distinguishes hosted tool limits from internal web tools", () => {
   const block = buildSystemBlock();
   assert.match(block, /does NOT support provider-hosted tools/i);

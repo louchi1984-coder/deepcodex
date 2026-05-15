@@ -77,3 +77,39 @@ $env:DEEPCODEX_WORKSPACE = "C:\Path\To\Project"
 - Plugin folders, app tool caches, and plugin sidecars are synchronized from the normal `%USERPROFILE%\.codex` home on launch.
 - DeepCodex opens a local Chrome DevTools Protocol port and injects a small renderer script to unlock the plugin entry and install buttons in the Codex UI.
 - The official Codex installation is not modified. DeepCodex copies the Codex app into its own local patched folder.
+
+## Windows npm / npx command note
+
+DeepCodex creates command shims under:
+
+```text
+%LOCALAPPDATA%\deepcodex\shims
+```
+
+On Windows, plugin or skill commands should call Node package managers through their `.cmd` launchers:
+
+```powershell
+npx.cmd --version
+npm.cmd --version
+pnpm.cmd --version
+yarn.cmd --version
+```
+
+Avoid this pattern:
+
+```powershell
+$env:Path = "C:\Program Files\nodejs;" + $env:Path
+Start-Process -FilePath "npx" -ArgumentList "remotion","studio"
+```
+
+That can cause Windows to open `C:\Program Files\nodejs\npx.ps1` as a text document. Prefer:
+
+```powershell
+Start-Process -FilePath "npx.cmd" -ArgumentList "remotion","studio"
+```
+
+or:
+
+```powershell
+cmd.exe /d /s /c "npx.cmd remotion studio"
+```
