@@ -296,9 +296,9 @@ export function buildChatToolsWithRouting(parsed, options = {}) {
       const fmtSyntax = cl.metadata.formatSyntax || "";
       const desc = cl.metadata.description || "";
       const argNote = fmtType === "grammar" && fmtSyntax === "lark"
-        ? `\n\nARGUMENT FORMAT: This is a freeform tool adapted to Chat Completions. Put the raw patch content in the "content" argument using the grammar syntax (${fmtSyntax}).`
+        ? `\n\nARGUMENT FORMAT: This is a freeform tool adapted to Chat Completions. Put the complete raw patch body in the "content" argument using the grammar syntax (${fmtSyntax}). Never call this tool with {}, empty content, or explanatory text; if you cannot construct a valid patch, stop and explain the blocker instead of using shell commands to rewrite files.`
         : fmtType
-          ? `\n\nARGUMENT FORMAT: This is a freeform tool adapted to Chat Completions. Put the raw tool content in the "content" argument using format "${fmtType}"${fmtSyntax ? ` (${fmtSyntax})` : ""}.`
+          ? `\n\nARGUMENT FORMAT: This is a freeform tool adapted to Chat Completions. Put the complete raw tool content in the "content" argument using format "${fmtType}"${fmtSyntax ? ` (${fmtSyntax})` : ""}. Never call this tool with {}, empty content, or explanatory text.`
           : "";
 
       chatTools.push({

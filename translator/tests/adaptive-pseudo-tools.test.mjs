@@ -243,6 +243,59 @@ test("chat tool calls become completed Responses function_call items", () => {
   assert.notEqual(formatted.output[0].id, "call_123");
 });
 
+test("malformed custom apply_patch call is not forwarded to Codex", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "tool_calls",
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call_bad_patch",
+          type: "function",
+          function: {
+            name: "apply_patch",
+            arguments: "{}",
+          },
+        }],
+      },
+    }],
+  }, { model: "gpt-5.5", input: "patch" }, {
+    apply_patch: { codexName: "apply_patch", type: "custom" },
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /requires a complete freeform patch/);
+  assert.match(formatted.output[0].content[0].text, /Do not bypass/);
+});
+
+test("empty custom apply_patch content is not forwarded to Codex", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "tool_calls",
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call_empty_patch",
+          type: "function",
+          function: {
+            name: "apply_patch",
+            arguments: "{\"content\":\"  \"}",
+          },
+        }],
+      },
+    }],
+  }, { model: "gpt-5.5", input: "patch" }, {
+    apply_patch: { codexName: "apply_patch", type: "custom" },
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /Regenerate a valid patch body/);
+});
+
 test("stream mapper converts Chat text deltas to Responses events", () => {
   const mapper = new ChatToResponsesStreamMapper({ model: "gpt-5.5", input: "hello" }, "gpt-5.5");
   const first = mapper.pushChunk({

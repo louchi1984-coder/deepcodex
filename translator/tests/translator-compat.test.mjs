@@ -547,6 +547,8 @@ compatTest("buildChatToolsWithRouting custom apply_patch has argument handling n
 
   // Description should mention freeform / grammar
   assert.ok(patch.function.description.includes("freeform"), "description mentions freeform");
+  assert.ok(patch.function.description.includes("Never call this tool with {}"), "description rejects empty JSON calls");
+  assert.ok(patch.function.description.includes("instead of using shell commands"), "description forbids shell rewrite bypass");
   assert.ok(patch.function.description.includes("lark"), "description mentions lark syntax");
 
   // Parameters should accept content

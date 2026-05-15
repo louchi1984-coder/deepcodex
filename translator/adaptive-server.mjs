@@ -223,6 +223,14 @@ function buildSystemBlock() {
     lines.push("- If an existing command uses Start-Process -FilePath \"npx\" or \"npm\", rewrite it to the .cmd executable before running.");
 
     lines.push("");
+    lines.push("Freeform patch tool rule:");
+    lines.push("- apply_patch is a freeform patch tool, not a JSON command tool.");
+    lines.push("- When using apply_patch through this DeepSeek route, call it with {\"content\":\"*** Begin Patch\\n...\\n*** End Patch\"}; the content value must be the complete patch body.");
+    lines.push("- Never call apply_patch with {}, an empty content string, or explanatory text instead of a patch.");
+    lines.push("- If an apply_patch call fails because the patch body is missing or invalid, regenerate a valid patch or stop and explain the blocker.");
+    lines.push("- Do not bypass apply_patch by writing or rewriting source files with shell commands merely because apply_patch formatting failed.");
+
+    lines.push("");
     lines.push("Markdown formatting rule:");
     lines.push("- When showing a URL or local address, prefer plain text or inline code and do not wrap the URL in bold or other decorative Markdown.");
 
@@ -881,6 +889,10 @@ function chatToResponsesFormat(json, original, routing = null) {
         const codexName = route?.codexName || upstreamName;
         const isCustom = route?.type === "custom";
         let args = tc.function?.arguments || "{}";
+        if (customArgumentsAreInvalid(args, route)) {
+            output.push({ type: "message", id: messageId(), role: "assistant", status: "completed", content: [{ type: "output_text", text: invalidCustomToolMessage(codexName), annotations: [] }] });
+            continue;
+        }
         // Unwrap custom tool arguments from the {content: "..."} wrapper
         if (isCustom && args) {
             try {
@@ -1116,6 +1128,32 @@ function translatedToolParts(tc, routing = null) {
     return { name: codexName, arguments: args, callId: tc.id || tc.call_id || `call_${randomUUID().replaceAll("-", "")}` };
 }
 
+function invalidCustomToolMessage(name) {
+    const tool = name || "custom/freeform tool";
+    return [
+        `${tool} requires a complete freeform patch/tool body, not empty JSON.`,
+        "Regenerate a valid patch body and call the tool with {\"content\":\"*** Begin Patch\\n...\\n*** End Patch\"}.",
+        "Do not bypass this by writing source files with shell commands just because the freeform tool call was malformed.",
+    ].join("\n");
+}
+
+function customArgumentsAreInvalid(args, route) {
+    if (route?.type !== "custom") return false;
+    const text = String(args ?? "").trim();
+    if (!text) return true;
+    try {
+        const parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== "object") return false;
+        if (Object.keys(parsed).length === 0) return true;
+        if (Object.prototype.hasOwnProperty.call(parsed, "content")) {
+            return typeof parsed.content !== "string" || parsed.content.trim().length === 0;
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function unwrapCustomArguments(args, route) {
     if (route?.type !== "custom" || !args) return args || "";
     try {
@@ -1277,6 +1315,10 @@ class ChatToResponsesStreamMapper {
         }
         for (const tc of this.toolCalls.values()) {
             if (!tc.opened) continue;
+            if (customArgumentsAreInvalid(tc.arguments, tc.route)) {
+                items.push([tc.outputIndex, { type: "message", id: messageId(), role: "assistant", status: "completed", content: [{ type: "output_text", text: invalidCustomToolMessage(tc.name), annotations: [] }] }]);
+                continue;
+            }
             items.push([tc.outputIndex, { id: tc.itemId, type: "function_call", status: "completed", call_id: tc.callId, name: tc.name, arguments: unwrapCustomArguments(tc.arguments, tc.route) }]);
         }
         return items.sort((a, b) => a[0] - b[0]);
@@ -1303,6 +1345,11 @@ class ChatToResponsesStreamMapper {
         }
         for (const tc of this.toolCalls.values()) {
             if (!tc.opened) continue;
+            if (customArgumentsAreInvalid(tc.arguments, tc.route)) {
+                const item = { type: "message", id: messageId(), role: "assistant", status: "completed", content: [{ type: "output_text", text: invalidCustomToolMessage(tc.name), annotations: [] }] };
+                events.push(["response.output_item.done", { type: "response.output_item.done", output_index: tc.outputIndex, item }]);
+                continue;
+            }
             const args = unwrapCustomArguments(tc.arguments, tc.route);
             const item = { id: tc.itemId, type: "function_call", status: "completed", call_id: tc.callId, name: tc.name, arguments: args };
             events.push(["response.function_call_arguments.done", { type: "response.function_call_arguments.done", item_id: tc.itemId, output_index: tc.outputIndex, call_id: tc.callId, name: tc.name, arguments: args }]);
