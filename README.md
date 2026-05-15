@@ -36,6 +36,14 @@ Lightweight desktop patch that routes Codex Desktop through DeepSeek while keepi
 @娄老师说的对
 ```
 
+## 建议更新到最新版
+
+如果你已经安装过早期版本，建议重新下载并安装最新版。
+
+近期版本重点修复了 translator 兼容层，包括上下文压缩续接、DSML 伪工具调用、`web_search` / `web_fetch` 本地工具回灌，以及部分 DeepSeek 脏输出导致的断流问题。旧版本如果遇到 `Reconnecting...`、工具调用直接吐到聊天里、压缩后记忆明显丢失等情况，优先升级最新版再测试。
+
+macOS 用户直接用新版 DMG 覆盖安装即可。Windows beta 用户建议下载最新 zip 后重新运行 `install-windows.bat`。
+
 ---
 
 它不重做 IDE，也不重写一整套插件生态。  
