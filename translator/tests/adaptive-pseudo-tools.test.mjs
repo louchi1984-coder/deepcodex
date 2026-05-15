@@ -373,6 +373,42 @@ test("pure leaked pseudo DSML assistant history is dropped after cleanup", () =>
   assert.equal(body.messages[0].content, "继续");
 });
 
+test("user-supplied pseudo DSML is preserved as text and never becomes null content", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "text", text: `<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="read_file">
+<｜｜DSML｜｜parameter name="file_path" string="true">/tmp/example.tsx</｜｜DSML｜｜parameter>
+</｜｜DSML｜｜invoke>
+</｜｜DSML｜｜tool_calls>` }],
+      },
+    ],
+  }, { allowTools: true, injectInternalTools: false });
+
+  assert.equal(body.messages.length, 1);
+  assert.equal(body.messages[0].role, "user");
+  assert.equal(typeof body.messages[0].content, "string");
+  assert.match(body.messages[0].content, /read_file/);
+  assert.notEqual(body.messages[0].content, null);
+});
+
+test("non-assistant empty content is removed before forwarding to Chat", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "message", role: "user", content: [] },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.equal(body.messages.length, 1);
+  assert.equal(body.messages[0].content, "继续");
+});
+
 test("readable context_compaction input is preserved as system context", () => {
   const body = responsesToChatBody({
     model: "gpt-5.5",

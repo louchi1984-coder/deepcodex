@@ -422,15 +422,31 @@ function hasMessageContent(content) {
     return content !== null && content !== undefined;
 }
 
+function normalizeChatContent(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) return content;
+    if (content === null || content === undefined) return "";
+    try { return JSON.stringify(content); } catch { return String(content); }
+}
+
 function sanitizeChatMessages(messages) {
-    return (messages || []).filter((message) => {
-        if (!message || typeof message !== "object") return false;
+    const sanitized = [];
+    for (const message of messages || []) {
+        if (!message || typeof message !== "object") continue;
+        const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
         if (message.role === "assistant") {
-            const hasTools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-            return hasTools || hasMessageContent(message.content);
+            if (hasTools) {
+                sanitized.push({ ...message, content: normalizeChatContent(message.content) });
+            } else if (hasMessageContent(message.content)) {
+                sanitized.push({ ...message, content: normalizeChatContent(message.content) });
+            }
+            continue;
         }
-        return true;
-    });
+        const content = normalizeChatContent(message.content);
+        if (!hasMessageContent(content)) continue;
+        sanitized.push({ ...message, content });
+    }
+    return sanitized;
 }
 
 function missingToolResultMessage(toolCallId) {
@@ -542,7 +558,7 @@ function responsesToChatBody(parsed, options = {}) {
                 if (activeReasoning && !pendingTC.reasoning_content) pendingTC.reasoning_content = activeReasoning;
                 pendingTC.tool_calls.push({ id: item.call_id || item.id || `call_${Date.now()}`, type: "function", function: { name: item.name, arguments: item.arguments || "{}" } });
             } else {
-                if (item.type === "message") { ensureF(); flushD(); activeReasoning = ""; const role = item.role === "developer" ? "system" : item.role; let content; if (typeof item.content === "string") content = item.content; else if (Array.isArray(item.content)) { content = item.content.map(convertBlock).filter(Boolean); if (content.length > 0 && content.every(c => c.type === "text")) content = content.map(c => c.text).join("\n"); } if (typeof content === "string" && hasPseudoToolMarkup(content)) content = stripPseudoToolMarkup(content); messages.push({ role, content: content || null }); }
+                if (item.type === "message") { ensureF(); flushD(); activeReasoning = ""; const role = item.role === "developer" ? "system" : item.role; let content; if (typeof item.content === "string") content = item.content; else if (Array.isArray(item.content)) { content = item.content.map(convertBlock).filter(Boolean); if (content.length > 0 && content.every(c => c.type === "text")) content = content.map(c => c.text).join("\n"); } if (typeof content === "string" && role !== "user" && hasPseudoToolMarkup(content)) content = stripPseudoToolMarkup(content); messages.push({ role, content: content || null }); }
                 else if (item.type === "function_call_output") { ensureF(); activeReasoning = ""; const callId = item.call_id || item.id || ""; const tc = typeof item.output === "string" ? item.output : JSON.stringify(item.output); messages.push({ role: "tool", tool_call_id: callId, content: tc }); }
                 else if (item.type === "context_compaction") { ensureF(); flushD(); activeReasoning = ""; const text = readableCompactionText(item); if (text) messages.push({ role: "system", content: `Previous Codex context compaction:\n${text}` }); }
                 else if (item.type === "reasoning") { activeReasoning = PROFILE?.capabilities?.reasoningReplay === false ? "" : readableReasoningText(item); }
@@ -557,7 +573,7 @@ function responsesToChatBody(parsed, options = {}) {
         }
         ensureF(); flushD();
     } else if (typeof parsed.input === "string") {
-        messages.push({ role: "user", content: hasPseudoToolMarkup(parsed.input) ? stripPseudoToolMarkup(parsed.input) : parsed.input });
+        messages.push({ role: "user", content: parsed.input });
     }
 
     const body = { model: resolveModel(parsed.model), messages: ensureToolCallResponses(sanitizeChatMessages(messages)), stream: false };
