@@ -44,10 +44,14 @@ let DEBUG_REQUEST_SEQ = 0;
 const CODEX_LOCAL_COMPACT_PROMPT = [
     "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.",
     "Include:",
+    "- The latest user request and the active in-flight task, including short numeric instructions resolved from the immediate context",
+    "- The exact files, commands, parameters, and outputs that were just changed or running when compaction happened",
     "- Current progress and key decisions made",
     "- Important context, constraints, or user preferences",
     "- What remains to be done (clear next steps)",
+    "- A one-line continuation instruction that says exactly what the next LLM should do first",
     "- Any critical data, examples, or references needed to continue",
+    "If there is an active task, explicitly state that the next LLM must not restart from project discovery and must continue from the last concrete action.",
     "Be concise, structured, and focused on helping the next LLM seamlessly continue the work.",
 ].join("\n");
 
@@ -642,7 +646,37 @@ function extractAssistantText(json) {
     return "";
 }
 
-function normalizeCompactSummary(text) {
+function compactFallbackTextFromRequest(original) {
+    const req = originalRequestFromArg(original);
+    const lines = [];
+    const pushText = (label, value) => {
+        const text = String(value || "").trim();
+        if (text) lines.push(`${label}: ${text}`);
+    };
+    const textFromContent = (content) => {
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) {
+            return content.map(part => typeof part === "string" ? part : part?.text || "").filter(Boolean).join("\n");
+        }
+        return "";
+    };
+    for (const item of Array.isArray(req.input) ? req.input : []) {
+        if (!item || typeof item !== "object") continue;
+        if (item.type === "message") {
+            pushText(`${item.role || "message"} message`, textFromContent(item.content));
+        } else if (item.type === "function_call") {
+            pushText("tool call", `${item.name || "unknown"} ${item.arguments || ""}`);
+        } else if (item.type === "function_call_output") {
+            pushText(`tool result ${item.call_id || ""}`.trim(), typeof item.output === "string" ? item.output : JSON.stringify(item.output || ""));
+        } else if (item.type === "context_compaction") {
+            pushText("previous context summary", readableCompactionText(item));
+        }
+    }
+    const text = lines.join("\n\n").trim();
+    return text.length > 6000 ? `...[earlier compact input omitted]\n${text.slice(-6000)}` : text;
+}
+
+function normalizeCompactSummary(text, fallbackText = "") {
     let summary = String(text || "").trim();
     const fence = summary.match(/^```(?:json|markdown|text)?\s*([\s\S]*?)\s*```$/i);
     if (fence) summary = fence[1].trim();
@@ -655,6 +689,14 @@ function normalizeCompactSummary(text) {
     }
     const weak = /^(好的|好|已理解|明白|收到|ok|okay)[，。,.\s]*(我会|会|将|I'll|I will)?/i;
     if (!summary || weak.test(summary) || summary.length < 24) {
+        const fallback = String(fallbackText || "").trim();
+        if (fallback) {
+            return [
+                "上游模型没有返回可用的压缩摘要。以下内容从本次 compact 输入中恢复，用于继续当前任务；不要重新做项目发现，优先接着最后一个具体动作继续。",
+                "",
+                fallback,
+            ].join("\n");
+        }
         return [
             "Compact summary unavailable: the upstream model returned an acknowledgement or an underspecified summary.",
             "Continue using the remaining thread context and local workspace state; do not assume omitted details were intentionally discarded.",
@@ -663,8 +705,8 @@ function normalizeCompactSummary(text) {
     return summary;
 }
 
-function chatToCompactResponseFormat(json, model) {
-    const summary = normalizeCompactSummary(extractAssistantText(json));
+function chatToCompactResponseFormat(json, model, original = null) {
+    const summary = normalizeCompactSummary(extractAssistantText(json), compactFallbackTextFromRequest(original));
     return {
         id: json.id || `resp_${Date.now()}`,
         object: "response",
@@ -1422,7 +1464,7 @@ const server = http.createServer(async (req, res) => {
             if (compact) {
                 const upstreamResp = await callUpstreamOnce(prepareCompactChatBody(chatBody));
                 if (!upstreamResp.ok) return fail(res, upstreamResp.status, upstreamResp.text ? upstreamResp.text.slice(0, 500) : `Upstream ${upstreamResp.status}`);
-                const fmt = chatToCompactResponseFormat(upstreamResp.json, parsed.model || "gpt-5.5");
+                const fmt = chatToCompactResponseFormat(upstreamResp.json, parsed.model || "gpt-5.5", parsed);
                 shouldInjectEndTurn(req, parsed);
                 res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
                 return res.end(JSON.stringify(fmt));

@@ -87,12 +87,36 @@ test("compact chat body disables tools and adds strict compact instruction", () 
   assert.equal(prepared.messages[0].role, "system");
   assert.match(prepared.messages[0].content, /CONTEXT CHECKPOINT COMPACTION/);
   assert.match(prepared.messages[0].content, /handoff summary/);
+  assert.match(prepared.messages[0].content, /latest user request/);
+  assert.match(prepared.messages[0].content, /active in-flight task/);
+  assert.match(prepared.messages[0].content, /exact files, commands, parameters/);
+  assert.match(prepared.messages[0].content, /one-line continuation instruction/);
   assert.match(prepared.messages[0].content, /What remains to be done/);
 });
 
 test("compact summary normalizer rejects acknowledgements", () => {
   const summary = normalizeCompactSummary("已理解，我会保存这些上下文用于后续工程。");
   assert.match(summary, /Compact summary unavailable/);
+});
+
+test("compact fallback preserves active task when upstream summary is weak", () => {
+  const formatted = chatToCompactResponseFormat({
+    id: "chatcmpl_compact_weak",
+    choices: [{ message: { role: "assistant", content: "好的" } }],
+  }, "gpt-5.5", {
+    input: [{
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: "当前任务：把 Editorial.tsx 的 padding 从 280 改成 400，并继续检查 node news-pipeline/pipeline.js demo-001 的结果。" }],
+    }],
+  });
+
+  const summary = formatted.output[0].summary;
+  assert.match(summary, /上游模型没有返回可用的压缩摘要/);
+  assert.match(summary, /Editorial\.tsx/);
+  assert.match(summary, /280/);
+  assert.match(summary, /400/);
+  assert.match(summary, /news-pipeline\/pipeline\.js demo-001/);
 });
 
 test("compact summary normalizer unwraps json and fences", () => {
