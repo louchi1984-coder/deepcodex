@@ -16,7 +16,8 @@ function splitTomlBlocks(text) {
   const blocks = [];
   let current = { header: null, lines: [] };
 
-  for (const line of text.split(/\r?\n/)) {
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.replace(/^\uFEFF/, "");
     if (/^\[[^\]]+\]\s*$/.test(line)) {
       blocks.push(current);
       current = { header: line.trim(), lines: [line] };

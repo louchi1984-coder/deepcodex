@@ -1,0 +1,51 @@
+{
+  "model": "gpt-5.5",
+  "tool_choice": "auto",
+  "instructions": "Synthetic translator compatibility fixture.",
+  "input": "hello",
+  "tools": [
+    { "type": "function", "name": "exec_command", "description": "Run a shell command.", "parameters": { "type": "object", "properties": { "cmd": { "type": "string" } }, "required": ["cmd"] } },
+    { "type": "function", "name": "write_stdin", "description": "Write stdin.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "list_mcp_resources", "description": "List MCP resources.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "list_mcp_resource_templates", "description": "List MCP resource templates.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "read_mcp_resource", "description": "Read MCP resource.", "parameters": { "type": "object", "properties": { "uri": { "type": "string" } } } },
+    { "type": "function", "name": "update_plan", "description": "Update task plan.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "request_user_input", "description": "Request user input.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "view_image", "description": "View image.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "spawn_agent", "description": "Spawn agent.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "send_input", "description": "Send input.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "resume_agent", "description": "Resume agent.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "wait_agent", "description": "Wait agent.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "close_agent", "description": "Close agent.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "read_thread_terminal", "description": "Read terminal.", "parameters": { "type": "object", "properties": {} } },
+    { "type": "function", "name": "load_workspace_dependencies", "description": "Load workspace dependencies.", "parameters": { "type": "object", "properties": {} } },
+    {
+      "type": "custom",
+      "name": "apply_patch",
+      "description": "Apply a freeform patch.",
+      "format": {
+        "type": "grammar",
+        "syntax": "lark",
+        "definition": "start: /.+/"
+      }
+    },
+    {
+      "type": "namespace",
+      "name": "mcp__node_repl__",
+      "tools": [
+        { "type": "function", "name": "js", "description": "Run JavaScript.", "parameters": { "type": "object", "properties": { "code": { "type": "string" } }, "required": ["code"] } },
+        { "type": "function", "name": "js_add_node_module_dir", "description": "Add node_modules directory.", "parameters": { "type": "object", "properties": {} } },
+        { "type": "function", "name": "js_reset", "description": "Reset JS runtime.", "parameters": { "type": "object", "properties": {} } }
+      ]
+    },
+    {
+      "type": "namespace",
+      "name": "codex_app",
+      "tools": [
+        { "type": "function", "name": "automation_update", "description": "Update automation.", "parameters": { "type": "object", "properties": {} } }
+      ]
+    },
+    { "type": "web_search", "name": "web_search" },
+    { "type": "image_generation", "name": "image_generation" }
+  ]
+}
