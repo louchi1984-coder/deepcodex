@@ -86,7 +86,8 @@ test("compact chat body disables tools and adds strict compact instruction", () 
   assert.equal(prepared.tools, undefined);
   assert.equal(prepared.messages[0].role, "system");
   assert.match(prepared.messages[0].content, /CONTEXT CHECKPOINT COMPACTION/);
-  assert.match(prepared.messages[0].content, /Do not answer the user's original task/);
+  assert.match(prepared.messages[0].content, /handoff summary/);
+  assert.match(prepared.messages[0].content, /What remains to be done/);
 });
 
 test("compact summary normalizer rejects acknowledgements", () => {
@@ -409,7 +410,7 @@ test("non-assistant empty content is removed before forwarding to Chat", () => {
   assert.equal(body.messages[0].content, "继续");
 });
 
-test("readable context_compaction input is preserved as system context", () => {
+test("readable context_compaction input is preserved with Codex summary prefix", () => {
   const body = responsesToChatBody({
     model: "gpt-5.5",
     input: [
@@ -418,8 +419,9 @@ test("readable context_compaction input is preserved as system context", () => {
     ],
   }, { allowTools: false, injectInternalTools: false });
 
-  assert.equal(body.messages[0].role, "system");
-  assert.match(body.messages[0].content, /Previous Codex context compaction/);
+  assert.equal(body.messages[0].role, "user");
+  assert.match(body.messages[0].content, /Another language model started to solve this problem/);
+  assert.match(body.messages[0].content, /avoid duplicating work/);
   assert.match(body.messages[0].content, /deepcodex/);
   assert.equal(body.messages[1].role, "user");
 });

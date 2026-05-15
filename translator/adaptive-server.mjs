@@ -41,15 +41,22 @@ const REASONING_BLOB_PREFIX = "deepcodex.reasoning.hex.v1:";
 const DEEPCODEX_DISPLAY_NAME = process.env.DEEPCODEX_DISPLAY_NAME || "娄老师说的对";
 let DEBUG_REQUEST_SEQ = 0;
 
-const COMPACT_SYSTEM = [
-    "You are handling a Codex CONTEXT CHECKPOINT COMPACTION request.",
-    "This is not a normal user chat. Do not answer the user's original task.",
-    "Write a handoff summary for the next coding agent to continue the same thread.",
-    "Output plain text only, not JSON, not tool calls, not acknowledgements.",
-    "Preserve concrete facts: current progress, decisions, constraints, user preferences, file paths, commands/tests run, errors, tool/process state, and clear next steps.",
-    "Keep names, paths, ports, model/provider choices, and command snippets exact when present.",
-    "If the conversation is in Chinese, write the summary in Chinese.",
+const CODEX_LOCAL_COMPACT_PROMPT = [
+    "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.",
+    "Include:",
+    "- Current progress and key decisions made",
+    "- Important context, constraints, or user preferences",
+    "- What remains to be done (clear next steps)",
+    "- Any critical data, examples, or references needed to continue",
+    "Be concise, structured, and focused on helping the next LLM seamlessly continue the work.",
 ].join("\n");
+
+const CODEX_CONTEXT_SUMMARY_PREFIX = [
+    "Another language model started to solve this problem and produced a summary of its thinking process.",
+    "You also have access to the state of the tools that were used by that language model.",
+    "Use this to build on the work that has already been done and avoid duplicating work.",
+    "Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:",
+].join(" ");
 
 let PROFILE = null;
 
@@ -560,7 +567,7 @@ function responsesToChatBody(parsed, options = {}) {
             } else {
                 if (item.type === "message") { ensureF(); flushD(); activeReasoning = ""; const role = item.role === "developer" ? "system" : item.role; let content; if (typeof item.content === "string") content = item.content; else if (Array.isArray(item.content)) { content = item.content.map(convertBlock).filter(Boolean); if (content.length > 0 && content.every(c => c.type === "text")) content = content.map(c => c.text).join("\n"); } if (typeof content === "string" && role !== "user" && hasPseudoToolMarkup(content)) content = stripPseudoToolMarkup(content); messages.push({ role, content: content || null }); }
                 else if (item.type === "function_call_output") { ensureF(); activeReasoning = ""; const callId = item.call_id || item.id || ""; const tc = typeof item.output === "string" ? item.output : JSON.stringify(item.output); messages.push({ role: "tool", tool_call_id: callId, content: tc }); }
-                else if (item.type === "context_compaction") { ensureF(); flushD(); activeReasoning = ""; const text = readableCompactionText(item); if (text) messages.push({ role: "system", content: `Previous Codex context compaction:\n${text}` }); }
+                else if (item.type === "context_compaction") { ensureF(); flushD(); activeReasoning = ""; const text = readableCompactionText(item); if (text) messages.push({ role: "user", content: `${CODEX_CONTEXT_SUMMARY_PREFIX}\n\n${text}` }); }
                 else if (item.type === "reasoning") { activeReasoning = PROFILE?.capabilities?.reasoningReplay === false ? "" : readableReasoningText(item); }
                 else {
                     ensureF();
@@ -615,7 +622,7 @@ function prepareCompactChatBody(chatBody) {
         tools: undefined,
         tool_choice: "none",
         messages: [
-            { role: "system", content: COMPACT_SYSTEM },
+            { role: "system", content: CODEX_LOCAL_COMPACT_PROMPT },
             ...(chatBody.messages || []),
         ],
     };
