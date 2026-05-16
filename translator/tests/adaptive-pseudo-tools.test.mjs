@@ -149,7 +149,10 @@ test("DeepSeek balance is exposed through a Codex usage-compatible shell", () =>
   assert.equal(usage.is_available, true);
   assert.equal(usage.balance.currency, "CNY");
   assert.equal(usage.balance.total_balance, 12.5);
-  assert.equal(usage.credits[0].remaining, 12.5);
+  assert.equal(usage.credits.has_credits, true);
+  assert.equal(usage.credits.balance, 12.5);
+  assert.equal(usage.rate_limit.primary_window.used_percent, 0);
+  assert.equal(usage.rate_limit.secondary_window.limit_window_seconds, 7 * 24 * 60 * 60);
   assert.equal(usage.deepcodex.source, "deepseek_user_balance");
 });
 
@@ -158,7 +161,8 @@ test("DeepSeek usage fallback keeps the existing quota menu safe", () => {
   assert.equal(usage.object, "codex_usage");
   assert.equal(usage.provider, "deepseek");
   assert.equal(usage.is_available, false);
-  assert.deepEqual(usage.credits, []);
+  assert.equal(usage.credits.has_credits, false);
+  assert.equal(usage.rate_limit, null);
   assert.equal(usage.deepcodex.error, "network unavailable");
 });
 

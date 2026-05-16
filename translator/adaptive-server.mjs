@@ -127,17 +127,44 @@ function numberOrNull(value) {
 
 function deepSeekBalanceToCodexUsage(balanceJson = {}) {
     const infos = Array.isArray(balanceJson.balance_infos) ? balanceJson.balance_infos : [];
-    const primary = infos[0] || {};
-    const total = infos.reduce((sum, item) => sum + (numberOrNull(item.total_balance) || 0), 0);
-    const granted = infos.reduce((sum, item) => sum + (numberOrNull(item.granted_balance) || 0), 0);
-    const toppedUp = infos.reduce((sum, item) => sum + (numberOrNull(item.topped_up_balance) || 0), 0);
+    const primary = infos.find((item) => (numberOrNull(item.total_balance) || 0) > 0) || infos[0] || {};
+    const sameCurrency = infos.filter((item) => !primary.currency || item.currency === primary.currency);
+    const balanceItems = sameCurrency.length ? sameCurrency : infos;
+    const total = balanceItems.reduce((sum, item) => sum + (numberOrNull(item.total_balance) || 0), 0);
+    const granted = balanceItems.reduce((sum, item) => sum + (numberOrNull(item.granted_balance) || 0), 0);
+    const toppedUp = balanceItems.reduce((sum, item) => sum + (numberOrNull(item.topped_up_balance) || 0), 0);
     const currency = primary.currency || "USD";
     const available = balanceJson.is_available !== false;
+    const now = Math.floor(Date.now() / 1000);
+    const hasCredits = available && total > 0;
 
     return {
         object: "codex_usage",
         provider: "deepseek",
         is_available: available,
+        plan_type: "pro",
+        rate_limit_name: "codex",
+        rate_limit_reached_type: null,
+        rate_limit: {
+            allowed: hasCredits,
+            limit_reached: !hasCredits,
+            primary_window: {
+                used_percent: hasCredits ? 0 : 100,
+                limit_window_seconds: 5 * 60 * 60,
+                reset_at: now + 5 * 60 * 60,
+            },
+            secondary_window: {
+                used_percent: hasCredits ? 0 : 100,
+                limit_window_seconds: 7 * 24 * 60 * 60,
+                reset_at: now + 7 * 24 * 60 * 60,
+            },
+        },
+        credits: {
+            has_credits: hasCredits,
+            unlimited: false,
+            balance: total,
+            currency,
+        },
         balance_infos: infos,
         balance: {
             currency,
@@ -145,19 +172,10 @@ function deepSeekBalanceToCodexUsage(balanceJson = {}) {
             granted_balance: granted,
             topped_up_balance: toppedUp,
         },
-        credits: [{
-            name: "DeepSeek API",
-            currency,
-            total,
-            granted,
-            topped_up: toppedUp,
-            remaining: total,
-            available,
-            resets_at: null,
-            percent_remaining: null,
-        }],
         limits: [],
         rate_limits: [],
+        additional_rate_limits: [],
+        spend_control: { reached: false },
         deepcodex: {
             display_name: DEEPCODEX_DISPLAY_NAME,
             source: "deepseek_user_balance",
@@ -170,6 +188,16 @@ function emptyCodexUsage(error = null) {
         object: "codex_usage",
         provider: "deepseek",
         is_available: false,
+        plan_type: "pro",
+        rate_limit_name: "codex",
+        rate_limit_reached_type: null,
+        rate_limit: null,
+        credits: {
+            has_credits: false,
+            unlimited: false,
+            balance: null,
+            currency: "USD",
+        },
         balance_infos: [],
         balance: {
             currency: "USD",
@@ -177,9 +205,10 @@ function emptyCodexUsage(error = null) {
             granted_balance: 0,
             topped_up_balance: 0,
         },
-        credits: [],
         limits: [],
         rate_limits: [],
+        additional_rate_limits: [],
+        spend_control: { reached: false },
         deepcodex: {
             display_name: DEEPCODEX_DISPLAY_NAME,
             source: "deepseek_user_balance",
