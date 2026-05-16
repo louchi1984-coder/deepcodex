@@ -35,6 +35,7 @@ const UPSTREAM = (process.env.UPSTREAM_URL || "https://api.deepseek.com/v1").rep
 const UPSTREAM_KEY = process.env.UPSTREAM_API_KEY || "";
 const PROFILE_PATH = process.env.TRANSLATOR_PROFILE_PATH || "";
 const MAX_TOOL_LOOPS = Number(process.env.TRANSLATOR_MAX_TOOL_LOOPS || 12);
+const MAX_RESTORED_INPUT_ITEMS = Number(process.env.TRANSLATOR_MAX_RESTORED_INPUT_ITEMS || 220);
 const DEBUG_UPSTREAM = process.env.DEEPCODEX_DEBUG_UPSTREAM === "1" || process.env.TRANSLATOR_DEBUG_UPSTREAM === "1";
 const RESPONSES_PATHS = new Set(["/responses", "/v1/responses", "/responses/compact", "/v1/responses/compact"]);
 const REASONING_BLOB_PREFIX = "deepcodex.reasoning.hex.v1:";
@@ -567,13 +568,14 @@ function responsesToChatBody(parsed, options = {}) {
     };
 
     // Input → messages
-    if (Array.isArray(parsed.input)) {
+    const inputItems = repairRestoredInput(parsed.input);
+    if (Array.isArray(inputItems)) {
         let pendingTC = null; let pendingIds = null; const deferred = [];
         let activeReasoning = "";
         const flushD = () => { if (deferred.length > 0) { messages.push(...deferred); deferred.length = 0; } };
         const ensureF = () => { if (pendingTC) { messages.push(pendingTC); pendingIds = new Set((pendingTC.tool_calls || []).map(tc => tc.id).filter(Boolean)); pendingTC = null; } };
 
-        for (const item of parsed.input) {
+        for (const item of inputItems) {
             if (item.type === "function_call") {
                 if (pendingIds?.size > 0) { flushD(); pendingIds = null; }
                 if (!pendingTC) {
@@ -827,6 +829,45 @@ function readableCompactionText(item) {
         }
     }
     return "";
+}
+
+function isDamagedCompactionItem(item) {
+    return item?.type === "context_compaction" && !item.encrypted_content && !readableCompactionText(item);
+}
+
+function damagedCompactionSummary() {
+    return [
+        "DeepCodex detected a damaged previous context_compaction item with no summary/text/content.",
+        "The exact earlier compressed history is unavailable, so noisy restored tool outputs, render logs, image payload records, and developer/system fragments after that damaged checkpoint were omitted before sending context to the model.",
+        "Continue from the remaining user/assistant text and current local workspace state. If a concrete file, command, or artifact is missing, inspect the workspace directly instead of assuming the old tool output was reliable.",
+    ].join("\n");
+}
+
+function repairRestoredInput(input) {
+    if (!Array.isArray(input)) return input;
+    let lastDamaged = -1;
+    for (let i = 0; i < input.length; i++) {
+        if (isDamagedCompactionItem(input[i])) lastDamaged = i;
+    }
+    if (lastDamaged < 0 && input.length <= MAX_RESTORED_INPUT_ITEMS) return input;
+
+    const start = Math.max(lastDamaged + 1, input.length - MAX_RESTORED_INPUT_ITEMS);
+    const repaired = lastDamaged >= 0
+        ? [{ type: "context_compaction", summary: damagedCompactionSummary() }]
+        : [];
+
+    for (const item of input.slice(start)) {
+        if (!item || typeof item !== "object") continue;
+        if (item.type === "message") {
+            if (lastDamaged >= 0 && !["user", "assistant"].includes(item.role)) continue;
+            repaired.push(item);
+        } else if (item.type === "context_compaction" && readableCompactionText(item)) {
+            repaired.push(item);
+        } else if (lastDamaged < 0 && (item.type === "function_call" || item.type === "function_call_output" || item.type === "reasoning")) {
+            repaired.push(item);
+        }
+    }
+    return repaired;
 }
 
 function readableReasoningText(item) {

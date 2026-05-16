@@ -524,6 +524,28 @@ test("opaque context_compaction input is not injected into prompt", () => {
   assert.equal(body.messages[0].role, "user");
 });
 
+test("damaged context_compaction repairs restore and drops noisy tool history", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "context_compaction" },
+      { type: "function_call", call_id: "call_old", name: "exec_command", arguments: "{\"cmd\":\"render\"}" },
+      { type: "function_call_output", call_id: "call_old", output: "ANSI render log ".repeat(2000) },
+      { type: "message", role: "developer", content: [{ type: "text", text: "stale developer instruction" }] },
+      { type: "message", role: "assistant", content: [{ type: "text", text: "上一轮已经做到一半。" }] },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续修复 compact restore。" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.equal(body.messages[0].role, "user");
+  assert.match(body.messages[0].content, /damaged previous context_compaction/);
+  assert.match(body.messages[0].content, /omitted/);
+  assert.ok(!body.messages.some((message) => message.role === "tool"), "old tool outputs are dropped");
+  assert.ok(!body.messages.some((message) => String(message.content).includes("stale developer instruction")), "stale developer message is dropped");
+  assert.equal(body.messages.at(-1).role, "user");
+  assert.match(body.messages.at(-1).content, /继续修复 compact restore/);
+});
+
 test("deepcodex reasoning blob is replayed onto following Chat tool calls", () => {
   const reasoningText = "Need to inspect cwd before answering.";
   const blob = `deepcodex.reasoning.hex.v1:${Buffer.from(reasoningText, "utf8").toString("hex")}`;
