@@ -424,6 +424,37 @@ The runtime should distinguish:
 
 Task completion should depend on state change or explicit user-facing stop condition, not narrative confidence.
 
+### 17. DeepSeek may narrate fake tool execution
+
+Observed:
+
+For search-style requests such as "找一找 remotion 的案例", DeepSeek may say things like:
+
+```text
+先搜 Remotion 相关的 showcase 和示例库
+搜到一堆好东西
+刚才在看 Remotion 官方 showcase 和 GitHub 示例仓库
+看着后台跑搜索但界面没反应
+```
+
+But the rollout/session JSONL contains no corresponding `function_call` and no `function_call_output` for `web_search`, `web_fetch`, browser, shell, git, or MCP resource tools. The assistant message is followed directly by `task_complete`.
+
+Risk:
+
+- user sees a confident progress narrative but no real search happened
+- URLs, examples, and source claims can be invented from model memory
+- debugging is misleading because the UI appears to have hidden background work
+
+Current translator guard:
+
+- the system block now includes a tool evidence honesty rule
+- the model is told not to claim it searched, fetched, opened, read, inspected, or ran anything unless a matching tool result exists in the current turn or provided history
+- for explicit search/discovery requests, the model is told to use available search/fetch/browser/shell tools before giving concrete external examples
+
+Runtime lesson:
+
+The translator should not synthesize tool calls from prose or decide task completion. The runtime should add a completion guard: if the final assistant message contains completed-action claims like "搜到", "我看了", "后台跑", or "刚才在看" but the current turn has no matching tool call/output, it should continue tool execution when possible or force an honest "no actual search result was obtained" response.
+
 ## What Not To Put In The Translator
 
 Do not make the translator a planner:

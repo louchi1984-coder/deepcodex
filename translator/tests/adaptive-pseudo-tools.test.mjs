@@ -351,6 +351,17 @@ test("system block distinguishes hosted tool limits from internal web tools", ()
   assert.doesNotMatch(block, /This route does NOT support: hosted tools/i);
 });
 
+test("system block forbids fake tool execution narration", () => {
+  const block = buildSystemBlock();
+  assert.match(block, /Tool evidence honesty rule:/);
+  assert.match(block, /Never claim that you searched/);
+  assert.match(block, /corresponding tool call\/result exists/);
+  assert.match(block, /Do not say a search is running in the background/);
+  assert.match(block, /找一找, 搜索, 查案例, 看看 GitHub/);
+  assert.match(block, /do not have actual search results/i);
+  assert.match(block, /Do not invent URLs, repositories, examples, or source claims/i);
+});
+
 test("stream mapper converts Chat tool_call deltas to Responses function_call events", () => {
   const mapper = new ChatToResponsesStreamMapper({ model: "gpt-5.5", input: "pwd" }, "gpt-5.5");
   const first = mapper.pushChunk({

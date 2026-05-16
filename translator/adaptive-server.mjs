@@ -191,6 +191,14 @@ function buildSystemBlock() {
     }
 
     lines.push("");
+    lines.push("Tool evidence honesty rule:");
+    lines.push("- Never claim that you searched, fetched, opened, read, inspected, or ran something unless a corresponding tool call/result exists in this turn or the provided conversation history.");
+    lines.push("- Do not say a search is running in the background. Tool execution is only real when the host/tool result is present.");
+    lines.push("- For requests like 找一找, 搜索, 查案例, 看看 GitHub, use an available web_search/web_fetch/browser/shell tool before giving concrete external examples or URLs.");
+    lines.push("- If no suitable tool is available or the tool fails, say plainly that you do not have actual search results in this turn and ask for a URL or permission/input as needed.");
+    lines.push("- Do not invent URLs, repositories, examples, or source claims from memory when the user asked to search.");
+
+    lines.push("");
     lines.push("Connector / app plugin rule:");
     lines.push("- Installed connector-type plugins are shared from the Codex public host.");
     lines.push("- Some connector plugins expose tools only after the connector has been activated and the host has synced app tools into the current session.");
