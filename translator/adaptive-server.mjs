@@ -957,7 +957,11 @@ function chatToResponsesFormat(json, original, routing = null) {
                 if (typeof parsed.content === "string") args = parsed.content;
             } catch { /* not json, use as-is */ }
         }
-        output.push({ type: "function_call", id: functionCallId(), status: "completed", call_id: tc.id || `call_${randomUUID().replaceAll("-", "")}`, name: codexName, arguments: args });
+        if (isCustom) {
+            output.push({ type: "custom_tool_call", id: functionCallId(), status: "completed", call_id: tc.id || `call_${randomUUID().replaceAll("-", "")}`, name: codexName, input: args });
+        } else {
+            output.push({ type: "function_call", id: functionCallId(), status: "completed", call_id: tc.id || `call_${randomUUID().replaceAll("-", "")}`, name: codexName, arguments: args });
+        }
     }
     for (const tc of pseudoExternalCalls) {
         output.push({ type: "function_call", id: functionCallId(), status: "completed", call_id: tc.id || `call_${randomUUID().replaceAll("-", "")}`, name: tc.function?.name || "", arguments: tc.function?.arguments || "{}" });
@@ -1160,6 +1164,9 @@ function pipeSSE(res, fmt) {
             sse("response.function_call_arguments.delta", { type: "response.function_call_arguments.delta", output_index: idx, item_id: item.id, call_id: item.call_id, name: item.name, delta: a });
             sse("response.function_call_arguments.done", { type: "response.function_call_arguments.done", output_index: idx, item_id: item.id, call_id: item.call_id, name: item.name, arguments: a });
             sse("response.output_item.done", { type: "response.output_item.done", output_index: idx, item });
+        } else if (item.type === "custom_tool_call") {
+            sse("response.output_item.added", { type: "response.output_item.added", output_index: idx, item: { ...item, status: "in_progress", input: "" } });
+            sse("response.output_item.done", { type: "response.output_item.done", output_index: idx, item });
         } else {
             sse("response.output_item.added", { type: "response.output_item.added", output_index: idx, item: { ...item, status: "in_progress" } });
             sse("response.output_item.done", { type: "response.output_item.done", output_index: idx, item });
@@ -1341,13 +1348,17 @@ class ChatToResponsesStreamMapper {
         const events = [];
         if (!tc.opened && tc.name) {
             tc.opened = true;
+            const itemType = tc.route?.type === "custom" ? "custom_tool_call" : "function_call";
+            const item = itemType === "custom_tool_call"
+                ? { id: tc.itemId, type: itemType, status: "in_progress", call_id: tc.callId, name: tc.name, input: "" }
+                : { id: tc.itemId, type: itemType, status: "in_progress", call_id: tc.callId, name: tc.name, arguments: "" };
             events.push(["response.output_item.added", {
                 type: "response.output_item.added",
                 output_index: tc.outputIndex,
-                item: { id: tc.itemId, type: "function_call", status: "in_progress", call_id: tc.callId, name: tc.name, arguments: "" },
+                item,
             }]);
         }
-        if (tc.opened && tc.emitted < tc.arguments.length) {
+        if (tc.route?.type !== "custom" && tc.opened && tc.emitted < tc.arguments.length) {
             const argDelta = tc.arguments.slice(tc.emitted);
             tc.emitted = tc.arguments.length;
             events.push(["response.function_call_arguments.delta", {
@@ -1376,7 +1387,11 @@ class ChatToResponsesStreamMapper {
                 items.push([tc.outputIndex, { type: "message", id: messageId(), role: "assistant", status: "completed", content: [{ type: "output_text", text: invalidCustomToolMessage(tc.name), annotations: [] }] }]);
                 continue;
             }
-            items.push([tc.outputIndex, { id: tc.itemId, type: "function_call", status: "completed", call_id: tc.callId, name: tc.name, arguments: unwrapCustomArguments(tc.arguments, tc.route) }]);
+            const args = unwrapCustomArguments(tc.arguments, tc.route);
+            const item = tc.route?.type === "custom"
+                ? { id: tc.itemId, type: "custom_tool_call", status: "completed", call_id: tc.callId, name: tc.name, input: args }
+                : { id: tc.itemId, type: "function_call", status: "completed", call_id: tc.callId, name: tc.name, arguments: args };
+            items.push([tc.outputIndex, item]);
         }
         return items.sort((a, b) => a[0] - b[0]);
     }
@@ -1408,8 +1423,13 @@ class ChatToResponsesStreamMapper {
                 continue;
             }
             const args = unwrapCustomArguments(tc.arguments, tc.route);
-            const item = { id: tc.itemId, type: "function_call", status: "completed", call_id: tc.callId, name: tc.name, arguments: args };
-            events.push(["response.function_call_arguments.done", { type: "response.function_call_arguments.done", item_id: tc.itemId, output_index: tc.outputIndex, call_id: tc.callId, name: tc.name, arguments: args }]);
+            const isCustom = tc.route?.type === "custom";
+            const item = isCustom
+                ? { id: tc.itemId, type: "custom_tool_call", status: "completed", call_id: tc.callId, name: tc.name, input: args }
+                : { id: tc.itemId, type: "function_call", status: "completed", call_id: tc.callId, name: tc.name, arguments: args };
+            if (!isCustom) {
+                events.push(["response.function_call_arguments.done", { type: "response.function_call_arguments.done", item_id: tc.itemId, output_index: tc.outputIndex, call_id: tc.callId, name: tc.name, arguments: args }]);
+            }
             events.push(["response.output_item.done", { type: "response.output_item.done", output_index: tc.outputIndex, item }]);
         }
         const output = this.completedItems().map(([, item]) => item);

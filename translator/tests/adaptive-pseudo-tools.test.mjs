@@ -214,7 +214,7 @@ test("chat finish_reason maps to Responses incomplete status", () => {
   assert.deepEqual(formatted.incomplete_details, { reason: "max_output_tokens" });
 });
 
-test("chat tool calls become completed Responses function_call items", () => {
+test("chat custom tool calls become completed Responses custom_tool_call items", () => {
   const formatted = chatToResponsesFormat({
     choices: [{
       finish_reason: "tool_calls",
@@ -235,11 +235,11 @@ test("chat tool calls become completed Responses function_call items", () => {
   });
 
   assert.equal(formatted.output.length, 1);
-  assert.equal(formatted.output[0].type, "function_call");
+  assert.equal(formatted.output[0].type, "custom_tool_call");
   assert.equal(formatted.output[0].status, "completed");
   assert.equal(formatted.output[0].call_id, "call_123");
   assert.equal(formatted.output[0].name, "apply_patch");
-  assert.equal(formatted.output[0].arguments, "*** Begin Patch\n*** End Patch\n");
+  assert.equal(formatted.output[0].input, "*** Begin Patch\n*** End Patch\n");
   assert.notEqual(formatted.output[0].id, "call_123");
 });
 
@@ -394,6 +394,45 @@ test("stream mapper converts Chat tool_call deltas to Responses function_call ev
   assert.equal(completed.response.output[0].type, "function_call");
   assert.equal(completed.response.output[0].call_id, "call_exec");
   assert.equal(completed.response.output[0].arguments, "{\"cmd\":\"pwd\"}");
+});
+
+test("stream mapper converts Chat custom tool calls to custom_tool_call items", () => {
+  const mapper = new ChatToResponsesStreamMapper({ model: "gpt-5.5", input: "patch" }, "gpt-5.5", {
+    apply_patch: { codexName: "apply_patch", type: "custom" },
+  });
+  const patch = "*** Begin Patch\n*** End Patch\n";
+  const first = mapper.pushChunk({
+    choices: [{
+      index: 0,
+      delta: {
+        tool_calls: [{
+          index: 0,
+          id: "call_patch",
+          type: "function",
+          function: { name: "apply_patch", arguments: JSON.stringify({ content: patch }).slice(0, 20) },
+        }],
+      },
+      finish_reason: null,
+    }],
+  });
+  assert.ok(first.some(([event, data]) => event === "response.output_item.added" && data.item.type === "custom_tool_call"));
+  assert.ok(!first.some(([event]) => event === "response.function_call_arguments.delta"));
+
+  const done = mapper.pushChunk({
+    choices: [{
+      index: 0,
+      delta: { tool_calls: [{ index: 0, function: { arguments: JSON.stringify({ content: patch }).slice(20) } }] },
+      finish_reason: "tool_calls",
+    }],
+  });
+  assert.ok(!done.some(([event]) => event === "response.function_call_arguments.done"));
+  const itemDone = done.find(([event, data]) => event === "response.output_item.done" && data.item.type === "custom_tool_call")?.[1];
+  assert.equal(itemDone.item.call_id, "call_patch");
+  assert.equal(itemDone.item.name, "apply_patch");
+  assert.equal(itemDone.item.input, patch);
+  const completed = done.find(([event]) => event === "response.completed")?.[1];
+  assert.equal(completed.response.output[0].type, "custom_tool_call");
+  assert.equal(completed.response.output[0].input, patch);
 });
 
 test("stream mapper converts reasoning_content to replayable reasoning item", () => {
