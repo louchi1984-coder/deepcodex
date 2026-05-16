@@ -4,6 +4,9 @@
 <p align="center">
   <strong>macOS 可用</strong> · <strong>Windows beta</strong> · <strong>DeepSeek API key</strong> · <strong>非商业使用</strong>
 </p>
+<p align="center">
+  <a href="README_EN.md">English README</a>
+</p>
 
 ---
 
@@ -24,27 +27,6 @@
 - **复用 Codex 的工作流**：继续用熟悉的项目、工具和开发节奏
 
 交流反馈：抖音 / 视频号 **@娄老师说的对**
-
----
-
-## English
-
-**deepcodex is not a new DeepSeek IDE. It is a local patch that gives the official Codex Desktop a separate, dual-runnable DeepSeek model route.**
-
-It keeps the Codex Desktop runtime, UI, workflows, project experience, and as much of the plugin / skill ecosystem as possible. The local translator adapts Codex's Responses-style traffic, tool calls, DSML pseudo tool markup, compaction, and local web tools for DeepSeek.
-
-Highlights:
-
-- **Dual app setup**: run official Codex and deepcodex side by side
-- **Independent app entry and icon**: use DeepCodex without overwriting the official Codex app
-- **Simple first setup**: enter a DeepSeek API key once, then launch normally
-- **Compatibility layer**: Responses ↔ Chat translation, tool calls, DSML, compaction, `web_search`, and `web_fetch`
-- **Plugin / skill compatibility where possible**: reuse Codex's shared plugin, skill, MCP, and local tool ecosystem
-- **Non-commercial use only**
-
-Contact / updates: Douyin or WeChat Channels **@娄老师说的对**
-
----
 
 ## 下载
 
