@@ -1,14 +1,8 @@
 <p align="center">
-  <img src="assets/codex-deepseek-icon-final.png" alt="deepcodex logo" width="120">
+  <img src="assets/deepcodex-readme-banner.png" alt="deepcodex banner">
 </p>
 
 <h1 align="center">deepcodex</h1>
-
-<p align="center">
-  把 Codex Desktop 接到 DeepSeek 的本地补丁。
-  <br>
-  A local patch that routes Codex Desktop through DeepSeek.
-</p>
 
 <p align="center">
   <strong>macOS 可用</strong> · <strong>Windows beta</strong> · <strong>DeepSeek API key</strong> · <strong>非商业使用</strong>
