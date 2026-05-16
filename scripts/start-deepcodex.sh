@@ -19,6 +19,7 @@ DEEPCODEX_APP_BUNDLE="${DEEPCODEX_APP_BUNDLE:-/Applications/deepcodex.app}"
 PROVIDER_PROFILE_PATH="${DEEPCODEX_PROVIDER_PROFILE:-$CODEX_HOME_DIR/provider-profile.json}"
 GLOBAL_CODEX_HOME="${GLOBAL_CODEX_HOME:-$HOME/.codex}"
 SHARED_CONFIG_SYNC="$ROOT/scripts/sync-shared-codex-config.mjs"
+DEEPCODEX_REGISTRATION_SYNC="$ROOT/scripts/sync-deepcodex-plugin-registrations.mjs"
 PLUGIN_HOST_SYNC_SCRIPT="$ROOT/scripts/sync-shared-codex-plugin-host.mjs"
 SIDECAR_SYNC_SCRIPT="$ROOT/scripts/sync-shared-codex-sidecars.mjs"
 CONFIG_TEMPLATE_PATH="${DEEPCODEX_CONFIG_TEMPLATE:-$ROOT/codex-home-deepseek-app/config.adaptive-oneapi.toml}"
@@ -480,6 +481,9 @@ const preserved = previousBlocks.filter(preserveBlock);
 const kept = targetBlocks.filter((block) => !preserveBlock(block));
 fs.writeFileSync(targetPath, render([...kept, ...preserved]));
 NODE
+  if [ -f "$DEEPCODEX_REGISTRATION_SYNC" ]; then
+    "$NODE_BIN" "$DEEPCODEX_REGISTRATION_SYNC" "$CODEX_HOME_DIR/config.toml" "$PREVIOUS_CONFIG_FILE" "$GLOBAL_CODEX_HOME/config.toml" >/dev/null 2>&1 || true
+  fi
   rm -f "$PREVIOUS_CONFIG_FILE"
 fi
 

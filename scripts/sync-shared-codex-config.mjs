@@ -92,6 +92,15 @@ function render(blocks) {
     .trimEnd() + "\n";
 }
 
+function mergeSharedBlocks(targetBlocks, sourceBlocks) {
+  const sourceShared = sourceBlocks.filter(isShared).map(normalizeWindowsMcpShim);
+  const sourceHeaders = new Set(sourceShared.map((block) => block.header));
+  const keptTargetBlocks = targetBlocks.filter(
+    (block) => !isShared(block) || !sourceHeaders.has(block.header)
+  );
+  return [...keptTargetBlocks, ...sourceShared];
+}
+
 if (!fs.existsSync(sourcePath)) {
   process.exit(0);
 }
@@ -104,7 +113,5 @@ const source = fs.readFileSync(sourcePath, "utf8");
 const target = fs.readFileSync(targetPath, "utf8");
 const sourceBlocks = splitTomlBlocks(source);
 const targetBlocks = splitTomlBlocks(target);
-const sharedBlocks = sourceBlocks.filter(isShared).map(normalizeWindowsMcpShim);
-const keptTargetBlocks = targetBlocks.filter((block) => !isShared(block));
 
-fs.writeFileSync(targetPath, render([...keptTargetBlocks, ...sharedBlocks]));
+fs.writeFileSync(targetPath, render(mergeSharedBlocks(targetBlocks, sourceBlocks)));

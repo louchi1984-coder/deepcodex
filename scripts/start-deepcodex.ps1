@@ -20,6 +20,7 @@ $SETUP_UI_SCRIPT = Join-Path $ROOT "scripts\deepcodex-setup-ui.mjs"
 $PROVIDER_PROFILE_PATH = if ($env:DEEPCODEX_PROVIDER_PROFILE) { $env:DEEPCODEX_PROVIDER_PROFILE } else { Join-Path $CODEX_HOME_DIR "provider-profile.json" }
 $GLOBAL_CODEX_HOME = if ($env:GLOBAL_CODEX_HOME) { $env:GLOBAL_CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
 $SHARED_CONFIG_SYNC = Join-Path $ROOT "scripts\sync-shared-codex-config.mjs"
+$DEEPCODEX_REGISTRATION_SYNC = Join-Path $ROOT "scripts\sync-deepcodex-plugin-registrations.mjs"
 $PLUGIN_HOST_SYNC = Join-Path $ROOT "scripts\sync-shared-codex-plugin-host.mjs"
 $DEEPCODEX_PLUGINS_SYNC = Join-Path $ROOT "scripts\sync-deepcodex-plugins.mjs"
 $DEEPCODEX_APP_TOOLS_SYNC = Join-Path $ROOT "scripts\sync-deepcodex-app-tools.mjs"
@@ -665,8 +666,12 @@ if (-not $ready) {
 New-Item -ItemType Directory -Path $CODEX_HOME_DIR, $ELECTRON_USER_DATA -Force | Out-Null
 $configToml = Join-Path $CODEX_HOME_DIR "config.toml"
 $backupToml = Join-Path $CODEX_HOME_DIR "config.toml.before-adaptive-oneapi"
+$previousToml = Join-Path $CODEX_HOME_DIR "config.toml.before-deepcodex-start"
 if ((Test-Path -LiteralPath $configToml) -and (-not (Test-Path -LiteralPath $backupToml))) {
     Copy-Item -LiteralPath $configToml -Destination $backupToml
+}
+if (Test-Path -LiteralPath $configToml) {
+    Copy-Item -LiteralPath $configToml -Destination $previousToml -Force
 }
 Copy-Item -LiteralPath (Join-Path $CODEX_HOME_DIR "config.adaptive-oneapi.toml") -Destination $configToml -Force
 Invoke-NodeStdin -Arguments @($configToml, (Join-Path $CODEX_HOME_DIR "deepseek-model-catalog.json"), $TRANSLATOR_URL) -Script @'
@@ -685,6 +690,9 @@ fs.writeFileSync(configPath, text);
 $globalConfig = Join-Path $GLOBAL_CODEX_HOME "config.toml"
 if (Test-Path -LiteralPath $globalConfig) {
     try { & $NODE_BIN $SHARED_CONFIG_SYNC $globalConfig $configToml | Out-Null } catch {}
+}
+if ((Test-Path -LiteralPath $previousToml) -and (Test-Path -LiteralPath $DEEPCODEX_REGISTRATION_SYNC)) {
+    try { & $NODE_BIN $DEEPCODEX_REGISTRATION_SYNC $configToml $previousToml $globalConfig | Out-Null } catch {}
 }
 foreach ($sync in @(
     @{ Path = $DEEPCODEX_PLUGINS_SYNC; Args = @($CODEX_HOME_DIR, $configToml, $GLOBAL_CODEX_HOME) },
