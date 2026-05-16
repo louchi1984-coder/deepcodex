@@ -98,13 +98,19 @@ function Copy-CodexAppForPatch {
     $asar = Join-Path $targetAppRoot "resources\app.asar"
     $exe = Join-Path $targetAppRoot "Codex.exe"
     if ((Test-Path -LiteralPath $BRAND_ASAR_SCRIPT) -and (Test-Path -LiteralPath $asar)) {
+        $previousErrorActionPreference = $ErrorActionPreference
         try {
             $brandLog = Join-Path $InstallRoot "brand-patched-asar.log"
-            & $NODE_BIN $BRAND_ASAR_SCRIPT $asar $exe *> $brandLog
-            if ($LASTEXITCODE -ne 0) {
+            $brandErr = Join-Path $InstallRoot "brand-patched-asar.err.log"
+            $ErrorActionPreference = "Continue"
+            & $NODE_BIN $BRAND_ASAR_SCRIPT $asar $exe > $brandLog 2> $brandErr
+            $brandExitCode = $LASTEXITCODE
+            $ErrorActionPreference = $previousErrorActionPreference
+            if ($brandExitCode -ne 0) {
                 Write-Warning "Could not patch Codex branding in app.asar. See $brandLog"
             }
         } catch {
+            if ($previousErrorActionPreference) { $ErrorActionPreference = $previousErrorActionPreference }
             Write-Warning "Could not patch Codex branding in app.asar: $($_.Exception.Message)"
         }
     }
