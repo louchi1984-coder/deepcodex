@@ -572,8 +572,13 @@ Seed-RuntimeDefaults
 Seed-OnboardingState
 
 try {
-    & $NODE_BIN $PLUGIN_HOST_SYNC $CODEX_HOME_DIR $GLOBAL_CODEX_HOME | Out-Null
-} catch {}
+    $pluginHostLog = Join-Path $DEEPCODEX_STATE_ROOT "deepcodex-plugin-host-sync.log"
+    & $NODE_BIN $PLUGIN_HOST_SYNC $CODEX_HOME_DIR $GLOBAL_CODEX_HOME *> $pluginHostLog
+} catch {
+    try {
+        $_ | Out-String | Set-Content -LiteralPath (Join-Path $DEEPCODEX_STATE_ROOT "deepcodex-plugin-host-sync.err.log") -Encoding UTF8
+    } catch {}
+}
 
 $UPSTREAM_API_KEY = Read-DeepSeekKey
 

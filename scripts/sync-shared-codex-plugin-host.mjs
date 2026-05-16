@@ -53,6 +53,11 @@ function moveAside(currentPath, relPath) {
   fs.renameSync(currentPath, backupPath);
 }
 
+function createDirectoryLink(sharedPath, targetPath) {
+  const type = process.platform === 'win32' ? 'junction' : 'dir';
+  fs.symlinkSync(sharedPath, targetPath, type);
+}
+
 ensureDir(codexHome);
 ensureDir(backupRoot);
 
@@ -68,9 +73,27 @@ for (const [relPath, sharedPath] of mappings) {
     summary.push({ relPath, mode: 'missing-shared-target', target: sharedPath });
     continue;
   }
-  moveAside(targetPath, relPath);
-  fs.symlinkSync(sharedPath, targetPath);
-  summary.push({ relPath, mode: 'linked', target: sharedPath });
+  try {
+    moveAside(targetPath, relPath);
+    createDirectoryLink(sharedPath, targetPath);
+    summary.push({
+      relPath,
+      mode: process.platform === 'win32' ? 'junction-linked' : 'symlink-linked',
+      target: sharedPath,
+    });
+  } catch (error) {
+    summary.push({
+      relPath,
+      mode: 'link-failed',
+      target: sharedPath,
+      error: error?.message || String(error),
+    });
+  }
 }
 
-console.log(JSON.stringify({ ok: true, codexHome, sharedCodexHome, summary }, null, 2));
+console.log(JSON.stringify({
+  ok: !summary.some(item => item.mode === 'link-failed'),
+  codexHome,
+  sharedCodexHome,
+  summary,
+}, null, 2));
