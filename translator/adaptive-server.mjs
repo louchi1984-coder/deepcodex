@@ -935,6 +935,43 @@ function responseShell(original, { id = responseId(), created = Math.floor(Date.
     };
 }
 
+function responseOutputHasToolCall(output) {
+    return Array.isArray(output) && output.some(item => item?.type === "function_call" || item?.type === "custom_tool_call");
+}
+
+function assistantTextLooksLikeUnsupportedToolClaim(text) {
+    const value = String(text || "").trim();
+    if (!value) return false;
+    const compact = value.replace(/\s+/g, " ");
+    const zhFuture = /(?:先|现在|马上|接下来|继续|我来|开始|准备|直接).{0,36}(?:读|读取|查看|检查|搜|搜索|运行|执行|安装|启动|生成|创建|写|写入|修改|补丁|打补丁|patch|渲染|导出|移动|复制|删除|下载|打开|跑)/i;
+    const zhDone = /(?:已|已经|刚才|我(?:已经)?|这里|现在).{0,36}(?:读完|读取|查看|检查|搜到|搜索到|运行|执行|安装|启动|生成|创建|写入|修改|补丁|打上|渲染|导出|移动|复制|删除|下载|打开|跑起来|跑完)/i;
+    const enClaim = /\b(?:I\s+(?:have\s+)?(?:installed|started|ran|read|generated|moved|copied|searched|fetched|opened|wrote|patched|downloaded|rendered)|(?:installed|started|ran|read|generated|moved|copied|searched|fetched|opened|wrote|patched|downloaded|rendered)\b)/i;
+    return zhFuture.test(compact) || zhDone.test(compact) || enClaim.test(compact);
+}
+
+function blockedToolClaimMessage() {
+    return [
+        "DeepCodex 已拦截这轮回复：模型声称要执行或已经执行工具动作，但本轮没有实际 tool call。",
+        "实际状态：本轮尚未读文件、运行命令、安装依赖、启动服务、生成文件、移动文件或搜索网页。",
+        "请继续时必须发起真实工具调用；如果工具不可用，必须明确说明原因。",
+    ].join("\n");
+}
+
+function guardAssistantToolClaims(output) {
+    if (responseOutputHasToolCall(output)) return output;
+    let changed = false;
+    const guarded = output.map(item => {
+        if (item?.type !== "message" || !Array.isArray(item.content)) return item;
+        const nextContent = item.content.map(part => {
+            if (part?.type !== "output_text" || !assistantTextLooksLikeUnsupportedToolClaim(part.text)) return part;
+            changed = true;
+            return { ...part, text: blockedToolClaimMessage() };
+        });
+        return nextContent === item.content ? item : { ...item, content: nextContent };
+    });
+    return changed ? guarded : output;
+}
+
 function chatToResponsesFormat(json, original, routing = null) {
     const originalRequest = originalRequestFromArg(original);
     const choice = json.choices?.[0] || {};
@@ -982,7 +1019,7 @@ function chatToResponsesFormat(json, original, routing = null) {
         created: json.created || Math.floor(Date.now() / 1000),
         model: json.model || originalRequest.model || "gpt-5.5",
         status: responseStatus(finishReason),
-        output,
+        output: guardAssistantToolClaims(output),
         usage: mapUsage(json.usage),
         finishReason,
     });
@@ -1388,7 +1425,10 @@ class ChatToResponsesStreamMapper {
             items.push([this.reasoning.outputIndex, { id: this.reasoning.id, type: "reasoning", status: "completed", summary: [], encrypted_content: encodeReasoningContent(this.reasoning.content) }]);
         }
         if (this.textOutputIndex !== null) {
-            items.push([this.textOutputIndex, { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text: sanitizeMarkdownUrlFormatting(this.text), annotations: [] }] }]);
+            const text = this.toolCalls.size === 0 && assistantTextLooksLikeUnsupportedToolClaim(this.text)
+                ? blockedToolClaimMessage()
+                : sanitizeMarkdownUrlFormatting(this.text);
+            items.push([this.textOutputIndex, { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] }]);
         }
         for (const tc of this.toolCalls.values()) {
             if (!tc.opened) continue;
@@ -1418,7 +1458,9 @@ class ChatToResponsesStreamMapper {
             }]);
         }
         if (this.textOutputIndex !== null) {
-            const text = sanitizeMarkdownUrlFormatting(this.text);
+            const text = this.toolCalls.size === 0 && assistantTextLooksLikeUnsupportedToolClaim(this.text)
+                ? blockedToolClaimMessage()
+                : sanitizeMarkdownUrlFormatting(this.text);
             const item = { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] };
             events.push(["response.output_text.done", { type: "response.output_text.done", item_id: this.messageId, output_index: this.textOutputIndex, content_index: 0, text }]);
             events.push(["response.content_part.done", { type: "response.content_part.done", item_id: this.messageId, output_index: this.textOutputIndex, content_index: 0, part: item.content[0] }]);

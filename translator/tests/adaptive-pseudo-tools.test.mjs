@@ -214,6 +214,20 @@ test("chat finish_reason maps to Responses incomplete status", () => {
   assert.deepEqual(formatted.incomplete_details, { reason: "max_output_tokens" });
 });
 
+test("chat response blocks fake tool execution claims without tool calls", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "我已经运行 npm install，启动 Remotion Studio，并生成音频文件。" },
+    }],
+  }, { model: "gpt-5.5", input: "帮我做视频" });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+  assert.match(formatted.output[0].content[0].text, /没有实际 tool call/);
+});
+
 test("chat custom tool calls become completed Responses custom_tool_call items", () => {
   const formatted = chatToResponsesFormat({
     choices: [{
@@ -313,6 +327,18 @@ test("stream mapper converts Chat text deltas to Responses events", () => {
   const completed = done.find(([event]) => event === "response.completed")?.[1];
   assert.equal(completed.response.output[0].content[0].text, "Hi");
   assert.equal(completed.response.usage.total_tokens, 4);
+});
+
+test("stream mapper blocks future-action-only text at completion", () => {
+  const mapper = new ChatToResponsesStreamMapper({ model: "gpt-5.5", input: "继续" }, "gpt-5.5");
+  mapper.pushChunk({
+    choices: [{ index: 0, delta: { content: "好的，先完整读当前 projections.mjs，然后一次性把补丁打上。" }, finish_reason: null }],
+  });
+  const done = mapper.pushChunk({
+    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+  });
+  const completed = done.find(([event]) => event === "response.completed")?.[1];
+  assert.match(completed.response.output[0].content[0].text, /已拦截这轮回复/);
 });
 
 test("native streaming is disabled when translator internal web tools may be needed", () => {
