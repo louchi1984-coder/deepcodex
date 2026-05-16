@@ -296,7 +296,7 @@ export function buildChatToolsWithRouting(parsed, options = {}) {
       const fmtSyntax = cl.metadata.formatSyntax || "";
       const desc = cl.metadata.description || "";
       const argNote = fmtType === "grammar" && fmtSyntax === "lark"
-        ? `\n\nARGUMENT FORMAT: This is a freeform tool adapted to Chat Completions. Put the complete raw patch body in the "content" argument using the grammar syntax (${fmtSyntax}). Never call this tool with {}, empty content, or explanatory text; if you cannot construct a valid patch, stop and explain the blocker instead of using shell commands to rewrite files.`
+        ? `\n\nARGUMENT FORMAT: This is a freeform tool adapted to Chat Completions. Put the complete raw patch body in the "content" argument using the grammar syntax (${fmtSyntax}). The body must start with "*** Begin Patch"; every file hunk must start with exactly "*** Add File: <path>", "*** Delete File: <path>", or "*** Update File: <path>"; update hunks use "@@" / "@@ <context>" plus space/-/+ lines; the final line must be exactly "*** End Patch". Never call this tool with {}, empty content, or explanatory text. Never use narrative hunk headers, ordinary unified-diff headers (---/+++), or line-number replacement prose; if you cannot construct a valid patch, stop and explain the blocker instead of using shell commands to rewrite files.`
         : fmtType
           ? `\n\nARGUMENT FORMAT: This is a freeform tool adapted to Chat Completions. Put the complete raw tool content in the "content" argument using format "${fmtType}"${fmtSyntax ? ` (${fmtSyntax})` : ""}. Never call this tool with {}, empty content, or explanatory text.`
           : "";

@@ -267,6 +267,8 @@ test("malformed custom apply_patch call is not forwarded to Codex", () => {
   assert.equal(formatted.output.length, 1);
   assert.equal(formatted.output[0].type, "message");
   assert.match(formatted.output[0].content[0].text, /requires a complete freeform patch/);
+  assert.match(formatted.output[0].content[0].text, /Add File/);
+  assert.match(formatted.output[0].content[0].text, /End Patch/);
   assert.match(formatted.output[0].content[0].text, /Do not bypass/);
 });
 

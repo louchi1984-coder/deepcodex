@@ -235,8 +235,12 @@ function buildSystemBlock() {
     lines.push("Freeform patch tool rule:");
     lines.push("- apply_patch is a freeform patch tool, not a JSON command tool.");
     lines.push("- When using apply_patch through this DeepSeek route, call it with {\"content\":\"*** Begin Patch\\n...\\n*** End Patch\"}; the content value must be the complete patch body.");
+    lines.push("- The patch body must use Codex apply_patch grammar exactly: after \"*** Begin Patch\", each file hunk starts with exactly one of \"*** Add File: <path>\", \"*** Delete File: <path>\", or \"*** Update File: <path>\".");
+    lines.push("- Inside an update hunk, use \"@@\" or \"@@ <context>\" followed by unchanged lines prefixed with space, removed lines prefixed with \"-\", and added lines prefixed with \"+\".");
+    lines.push("- Never use narrative hunk headers such as \"*** Update Projections\", ordinary unified-diff headers such as \"--- a/file\" or \"+++ b/file\", line-number replacement instructions, or Markdown prose inside the patch body.");
+    lines.push("- Every apply_patch body must end with a final line exactly equal to \"*** End Patch\".");
     lines.push("- Never call apply_patch with {}, an empty content string, or explanatory text instead of a patch.");
-    lines.push("- If an apply_patch call fails because the patch body is missing or invalid, regenerate a valid patch or stop and explain the blocker.");
+    lines.push("- If an apply_patch call fails because the patch body is missing or invalid, immediately regenerate one valid full patch using the exact grammar above, or stop and explain the blocker.");
     lines.push("- Do not bypass apply_patch by writing or rewriting source files with shell commands merely because apply_patch formatting failed.");
 
     lines.push("");
@@ -1197,6 +1201,8 @@ function invalidCustomToolMessage(name) {
     return [
         `${tool} requires a complete freeform patch/tool body, not empty JSON.`,
         "Regenerate a valid patch body and call the tool with {\"content\":\"*** Begin Patch\\n...\\n*** End Patch\"}.",
+        "For apply_patch, each file hunk must start with exactly one of \"*** Add File:\", \"*** Delete File:\", or \"*** Update File:\" and the final line must be exactly \"*** End Patch\".",
+        "Do not use narrative headers, ordinary unified diff headers (---/+++), or line-number replacement prose inside the patch body.",
         "Do not bypass this by writing source files with shell commands just because the freeform tool call was malformed.",
     ].join("\n");
 }
