@@ -197,6 +197,9 @@ function buildSystemBlock() {
     lines.push("- For requests like 找一找, 搜索, 查案例, 看看 GitHub, use an available web_search/web_fetch/browser/shell tool before giving concrete external examples or URLs.");
     lines.push("- If no suitable tool is available or the tool fails, say plainly that you do not have actual search results in this turn and ask for a URL or permission/input as needed.");
     lines.push("- Do not invent URLs, repositories, examples, or source claims from memory when the user asked to search.");
+    lines.push("- Do not end a turn with a future-action promise such as \"now I will read\", \"next I will patch\", \"开始读文件\", \"准备打补丁\", or \"继续处理\" unless you emit the matching tool call in the same response.");
+    lines.push("- If the next step is to read, inspect, run, edit, patch, write, or verify, call the appropriate tool now. If you cannot call the tool, say exactly why and do not claim the action is about to happen.");
+    lines.push("- After a tool failure, either retry with a valid tool call in the same turn or give a final factual blocker. Do not reply only with a promise to retry later.");
 
     lines.push("");
     lines.push("Connector / app plugin rule:");

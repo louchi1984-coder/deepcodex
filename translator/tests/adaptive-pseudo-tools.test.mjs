@@ -362,6 +362,9 @@ test("system block forbids fake tool execution narration", () => {
   assert.match(block, /找一找, 搜索, 查案例, 看看 GitHub/);
   assert.match(block, /do not have actual search results/i);
   assert.match(block, /Do not invent URLs, repositories, examples, or source claims/i);
+  assert.match(block, /Do not end a turn with a future-action promise/);
+  assert.match(block, /call the appropriate tool now/);
+  assert.match(block, /After a tool failure/);
 });
 
 test("stream mapper converts Chat tool_call deltas to Responses function_call events", () => {
