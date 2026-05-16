@@ -116,6 +116,123 @@ function deepcodexUser() {
     };
 }
 
+function upstreamRootUrl() {
+    return UPSTREAM.replace(/\/v1(?:\/.*)?$/i, "");
+}
+
+function numberOrNull(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+function deepSeekBalanceToCodexUsage(balanceJson = {}) {
+    const infos = Array.isArray(balanceJson.balance_infos) ? balanceJson.balance_infos : [];
+    const primary = infos[0] || {};
+    const total = infos.reduce((sum, item) => sum + (numberOrNull(item.total_balance) || 0), 0);
+    const granted = infos.reduce((sum, item) => sum + (numberOrNull(item.granted_balance) || 0), 0);
+    const toppedUp = infos.reduce((sum, item) => sum + (numberOrNull(item.topped_up_balance) || 0), 0);
+    const currency = primary.currency || "USD";
+    const available = balanceJson.is_available !== false;
+
+    return {
+        object: "codex_usage",
+        provider: "deepseek",
+        is_available: available,
+        balance_infos: infos,
+        balance: {
+            currency,
+            total_balance: total,
+            granted_balance: granted,
+            topped_up_balance: toppedUp,
+        },
+        credits: [{
+            name: "DeepSeek API",
+            currency,
+            total,
+            granted,
+            topped_up: toppedUp,
+            remaining: total,
+            available,
+            resets_at: null,
+            percent_remaining: null,
+        }],
+        limits: [],
+        rate_limits: [],
+        deepcodex: {
+            display_name: DEEPCODEX_DISPLAY_NAME,
+            source: "deepseek_user_balance",
+        },
+    };
+}
+
+function emptyCodexUsage(error = null) {
+    return {
+        object: "codex_usage",
+        provider: "deepseek",
+        is_available: false,
+        balance_infos: [],
+        balance: {
+            currency: "USD",
+            total_balance: 0,
+            granted_balance: 0,
+            topped_up_balance: 0,
+        },
+        credits: [],
+        limits: [],
+        rate_limits: [],
+        deepcodex: {
+            display_name: DEEPCODEX_DISPLAY_NAME,
+            source: "deepseek_user_balance",
+            error,
+        },
+    };
+}
+
+async function fetchDeepSeekBalance() {
+    if (!UPSTREAM_KEY) return emptyCodexUsage("UPSTREAM_API_KEY not set");
+    const candidates = [
+        `${upstreamRootUrl()}/user/balance`,
+        `${UPSTREAM}/user/balance`,
+    ];
+    const seen = new Set();
+    let lastError = null;
+    for (const endpoint of candidates) {
+        if (seen.has(endpoint)) continue;
+        seen.add(endpoint);
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 8000);
+            const resp = await fetch(endpoint, {
+                method: "GET",
+                headers: {
+                    "authorization": `Bearer ${UPSTREAM_KEY}`,
+                    "accept": "application/json",
+                },
+                signal: controller.signal,
+            });
+            clearTimeout(timer);
+            const text = await resp.text();
+            if (!resp.ok) {
+                lastError = `DeepSeek balance ${resp.status}`;
+                if (resp.status === 404) continue;
+                return emptyCodexUsage(lastError);
+            }
+            const json = text ? JSON.parse(text) : {};
+            return deepSeekBalanceToCodexUsage(json);
+        } catch (error) {
+            lastError = error?.name === "AbortError" ? "DeepSeek balance timeout" : (error?.message || String(error));
+        }
+    }
+    return emptyCodexUsage(lastError || "DeepSeek balance unavailable");
+}
+
+function isUsagePath(pathname) {
+    return pathname === "/backend-api/api/codex/usage"
+        || pathname === "/api/codex/usage"
+        || pathname === "/backend-api/wham/usage"
+        || pathname === "/wham/usage";
+}
+
 // ──────────────────────────────────────────────── model mapping ──────────────
 
 const CODEX_TO_MODEL = {
@@ -1502,6 +1619,12 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify(deepcodexUser()));
     }
 
+    if (req.method === "GET" && isUsagePath(url.pathname)) {
+        const usage = await fetchDeepSeekBalance();
+        res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+        return res.end(JSON.stringify(usage));
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/models") {
         const models = PROFILE?.models || ["deepseek-v4-pro", "deepseek-v4-flash", "gpt-5.5", "gpt-5.4-mini"];
         res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
@@ -1588,4 +1711,4 @@ if (process.env.NODE_ENV !== "test") {
     startup().then(() => server.listen(PORT, HOST, () => console.error(`[adaptive] http://${HOST}:${PORT} → ${UPSTREAM}`)));
 }
 
-export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, MAX_TOOL_LOOPS };
+export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, deepSeekBalanceToCodexUsage, emptyCodexUsage, MAX_TOOL_LOOPS };
