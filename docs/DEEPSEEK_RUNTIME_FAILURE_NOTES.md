@@ -12,6 +12,9 @@ DeepCodex is a Codex Desktop route/translator patch, not a separate agent runtim
 - pseudo tool markup leakage
 - MCP/skill resource assumptions
 - Windows shell command quirks
+- connector/app-tool availability
+- permission and local preview ambiguity
+- Markdown/rendering hygiene
 
 ## Observed Failure Modes
 
@@ -224,6 +227,203 @@ Runtime lesson:
 
 Shared plugin/skill state should either be linked before the host starts or fail visibly. Do not silently continue with a half-synced ecosystem.
 
+### 9. Hosted tool absence can be misread as local tool absence
+
+Observed:
+
+When provider-hosted tools such as OpenAI `web_search_preview` are unavailable, DeepSeek may generalize too far and say `web_search` is unavailable even though the translator has injected local `web_search` / `web_fetch`.
+
+Risk:
+
+- search-capable requests are prematurely refused
+- model asks the user to take over even though local tools exist
+- logs look like search script failure while the real issue is route/tool wording
+
+Current translator guard:
+
+- provider-hosted tool limitations are described separately from translator-owned internal tools
+- internal `web_search` / `web_fetch` are injected only when the provider lacks hosted tools
+- local tool failures are returned as tool messages instead of user-visible hosted-tool errors
+
+Runtime lesson:
+
+Capability descriptions need separate lanes:
+
+- provider capabilities
+- translator-owned internal tools
+- host/Codex tools
+- connector/app tools
+
+Do not collapse them into a single "tools unavailable" state.
+
+### 10. Search/fetch strategy is fragile without explicit evidence flow
+
+Observed:
+
+DeepSeek sometimes searches, receives snippets, and then either repeats the same search or emits a fetch request as visible DSML markup. It can also rely too heavily on search snippets without fetching primary pages.
+
+Risk:
+
+- weak evidence
+- repeated tool loops
+- user sees raw tool markup
+- final answer overstates uncertain search results
+
+Current translator guard:
+
+- local `web_search` is discovery
+- `web_fetch` is available for known URLs
+- repeated internal calls are stopped
+- finalization prompt asks the model to answer from collected tool results
+
+Runtime lesson:
+
+For research workflows, the runtime should represent search as a mini pipeline:
+
+1. search
+2. select sources
+3. fetch sources
+4. synthesize with citations or state missing evidence
+
+Leaving this entirely to the model causes inconsistent behavior.
+
+### 11. Connector/app plugins can look installed but not active
+
+Observed:
+
+Google Drive/Gmail-style connector plugins can have local plugin metadata and skill files present, while actual app tools are absent from the current thread. DeepSeek may then inspect local caches, infer connector state from files, or tell the user to reconnect without a host-level connector prompt.
+
+Risk:
+
+- installed plugin is mistaken for active connector
+- user expects a connector auth flow but gets file-cache analysis
+- DeepCodex appears to support a connector that the current route cannot actually invoke
+
+Current boundary:
+
+- DeepCodex reuses Codex plugin/skill directories where possible
+- hosted/app connector tools still depend on the Codex/OpenAI host activation path
+- translator should not fake connector activation
+
+Runtime lesson:
+
+Connector state should be a first-class runtime capability:
+
+- installed
+- connected/authenticated
+- tools available in this thread
+- unavailable on this route
+
+The model should see this state directly instead of inferring it from files.
+
+### 12. Computer Use / hosted desktop tools can degrade into shell fallback
+
+Observed:
+
+When Computer Use tools are absent on the DeepSeek route, the model may try shell-level fallbacks such as `screencapture`, keyboard shortcuts, or generic app commands. If those are sandboxed or permission-blocked, it asks the user for screenshots.
+
+Risk:
+
+- unclear whether the plugin is missing, permissions are missing, or route does not support hosted tools
+- local shell fallbacks do not match Computer Use capability
+- user sees inconsistent behavior between OpenAI and DeepSeek routes
+
+Runtime lesson:
+
+Desktop automation capability should be reported as a structured runtime capability, not discovered by trial and error. If Computer Use is absent, the model should say so clearly and avoid pretending that shell screenshots are equivalent.
+
+### 13. Local preview and localhost failures are easy to misattribute
+
+Observed:
+
+Game/web workflows can fail to preview because of local browser isolation, VPN/proxy behavior, missing dev server, sandboxed listener startup, or `file://` asset paths. DeepSeek may treat these as project bugs or keep switching servers/ports.
+
+Risk:
+
+- unnecessary project rewrites
+- server churn
+- false debugging of app code
+- user loses trust because preview behavior changes between routes
+
+Runtime lesson:
+
+Preview state should be explicit:
+
+- server started or failed
+- port
+- browser surface used
+- network/proxy constraints
+- whether `file://` or HTTP preview is expected
+
+The model should not infer all preview failures from app code alone.
+
+### 14. macOS permission prompts can be missed
+
+Observed:
+
+Some actions trigger short-lived macOS permission prompts. If the command exits quickly, the prompt may disappear before the user can click Allow.
+
+Risk:
+
+- model assumes the command failed
+- user never had time to grant permission
+- repeated attempts create confusing state
+
+Current translator guard:
+
+- the system block asks the model to keep permission-sensitive processes alive long enough for prompts
+
+Runtime lesson:
+
+Permission prompts should be surfaced by the host when possible. Prompt-sensitive operations should not rely only on model instructions.
+
+### 15. Markdown hygiene affects UI perception
+
+Observed:
+
+DeepSeek can leave Markdown decorations unclosed or wrap local URLs with trailing `**`, producing UI artifacts such as:
+
+```text
+http://localhost:3001/**
+```
+
+Risk:
+
+- user thinks the tool produced an incorrect URL
+- preview links look broken
+- harmless formatting dirt becomes a debugging distraction
+
+Current translator guard:
+
+- known local URL bolding artifacts are sanitized
+
+Runtime lesson:
+
+Rendering cleanup is acceptable only for narrow, well-known artifacts. Do not build a broad Markdown repair engine in the translator.
+
+### 16. DeepSeek may over-explain process after command/tool failure
+
+Observed:
+
+After failed commands, DeepSeek often narrates what it will do next, explains tool limitations, or analyzes why something failed, but does not always perform the next concrete action.
+
+Risk:
+
+- apparent progress without state mutation
+- task appears "handled" in the UI but no artifact/check changed
+
+Runtime lesson:
+
+The runtime should distinguish:
+
+- analysis text
+- planned action
+- actual tool call
+- artifact mutation
+- verification result
+
+Task completion should depend on state change or explicit user-facing stop condition, not narrative confidence.
+
 ## What Not To Put In The Translator
 
 Do not make the translator a planner:
@@ -252,4 +452,5 @@ The DeepSeek Desktop / Codex runtime layer should consider:
 4. Validate MCP resource calls against the actual resource registry before model execution.
 5. Add a recovery path after tool failure: retry valid tool call, ask for permission/input, or clearly state no action was performed.
 6. Keep Windows shell command normalization in the execution layer.
-
+7. Expose route capabilities as structured state so the model does not infer connector, Computer Use, preview, or search availability from failures.
+8. Separate "assistant promised an action" from "runtime observed an action" in rollout/session records.
