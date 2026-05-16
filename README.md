@@ -22,7 +22,7 @@
 
 ## 一句话
 
-**deepcodex = 可双开的 Codex Desktop + DeepSeek 路线。**
+**deepcodex 不是重写一个 DeepSeek IDE，而是给官方 Codex Desktop 加一条可双开的 DeepSeek 模型通道。**
 
 它不是重写一个 IDE，也不是另起一套插件生态。  
 它做的是一个更克制、也更实用的事：在本机保留 Codex Desktop 的 runtime、UI 和工作流，同时用独立入口、独立图标和本地 translator，把模型请求转到 DeepSeek。
