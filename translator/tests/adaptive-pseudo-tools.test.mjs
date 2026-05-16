@@ -592,6 +592,40 @@ test("missing tool results in prior history are synthesized before forwarding up
   assert.equal(body.messages[2].role, "user");
 });
 
+test("orphan restored tool outputs are dropped before forwarding upstream", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+      { type: "function_call_output", call_id: "call_old", output: "stale output" },
+      { type: "message", role: "assistant", content: [{ type: "text", text: "继续处理。" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.ok(!body.messages.some((message) => message.role === "tool"));
+  assert.equal(body.messages[0].role, "user");
+  assert.equal(body.messages[1].role, "assistant");
+});
+
+test("mismatched restored tool outputs do not break Chat tool ordering", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_exec", name: "exec_command", arguments: "{\"cmd\":\"pwd\"}" },
+      { type: "function_call_output", call_id: "call_other", output: "wrong tool result" },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.equal(body.messages[0].role, "assistant");
+  assert.equal(body.messages[0].tool_calls[0].id, "call_exec");
+  assert.equal(body.messages[1].role, "tool");
+  assert.equal(body.messages[1].tool_call_id, "call_exec");
+  assert.match(body.messages[1].content, /tool_call_interrupted/);
+  assert.equal(body.messages[2].role, "user");
+  assert.ok(!body.messages.some((message) => message.tool_call_id === "call_other"));
+});
+
 test("developer approval messages are deferred until after tool output", () => {
   const body = responsesToChatBody({
     model: "gpt-5.5",

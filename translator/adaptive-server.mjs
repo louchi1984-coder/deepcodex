@@ -530,12 +530,20 @@ function ensureToolCallResponses(messages) {
                 continue;
             }
 
+            if (message.role === "tool") {
+                continue;
+            }
+
             if (message.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
                 flushPending();
             } else {
                 buffered.push(message);
                 continue;
             }
+        }
+
+        if (message.role === "tool") {
+            continue;
         }
 
         output.push(message);
