@@ -1,9 +1,6 @@
 <p align="center">
   <img src="assets/deepcodex-readme-banner.png" alt="deepcodex banner">
 </p>
-
-<h1 align="center">deepcodex</h1>
-
 <p align="center">
   <strong>macOS 可用</strong> · <strong>Windows beta</strong> · <strong>DeepSeek API key</strong> · <strong>非商业使用</strong>
 </p>
