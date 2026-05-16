@@ -228,6 +228,51 @@ test("chat response blocks fake tool execution claims without tool calls", () =>
   assert.match(formatted.output[0].content[0].text, /没有实际 tool call/);
 });
 
+test("chat response blocks direct command promises without tool calls", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "`npm run dev` / `npm start` 都崩。我直接在项目目录用 `npx remotion studio --port=3001`。" },
+    }],
+  }, { model: "gpt-5.5", input: "赶紧的" });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("chat response allows completion summary when prior tool evidence exists", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "已经读取 projections.mjs，并把对应改动写入完成。" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [{ type: "function_call_output", call_id: "call_read", output: "file content" }],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.doesNotMatch(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("chat response still blocks future action promise even when prior tool evidence exists", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "读完了。现在我直接用 npx remotion studio 启动。" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [{ type: "function_call_output", call_id: "call_read", output: "file content" }],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
 test("chat custom tool calls become completed Responses custom_tool_call items", () => {
   const formatted = chatToResponsesFormat({
     choices: [{
@@ -333,6 +378,18 @@ test("stream mapper blocks future-action-only text at completion", () => {
   const mapper = new ChatToResponsesStreamMapper({ model: "gpt-5.5", input: "继续" }, "gpt-5.5");
   mapper.pushChunk({
     choices: [{ index: 0, delta: { content: "好的，先完整读当前 projections.mjs，然后一次性把补丁打上。" }, finish_reason: null }],
+  });
+  const done = mapper.pushChunk({
+    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+  });
+  const completed = done.find(([event]) => event === "response.completed")?.[1];
+  assert.match(completed.response.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("stream mapper blocks direct command promises at completion", () => {
+  const mapper = new ChatToResponsesStreamMapper({ model: "gpt-5.5", input: "继续" }, "gpt-5.5");
+  mapper.pushChunk({
+    choices: [{ index: 0, delta: { content: "Server 挂了。让我确认文件状态然后启动：我直接用 npx remotion studio。" }, finish_reason: null }],
   });
   const done = mapper.pushChunk({
     choices: [{ index: 0, delta: {}, finish_reason: "stop" }],

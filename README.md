@@ -73,7 +73,7 @@ macOS:
 
 Windows beta:
 
-1. Download `deepcodex-windows-v0.1.4-preview.zip`
+1. Download `deepcodex-windows-v0.1.5-preview.zip`
 2. Unzip it
 3. Double-click `install-windows.bat`
 4. Open `DeepCodex` from the desktop shortcut or Start menu
@@ -191,7 +191,7 @@ deepcodex app / DeepCodex.exe
 
 前置依赖：请先安装官方 **Codex Desktop for Windows**。
 
-下载 `deepcodex-windows-v0.1.4-preview.zip`，解压后双击：
+下载 `deepcodex-windows-v0.1.5-preview.zip`，解压后双击：
 
 ```text
 install-windows.bat
@@ -220,7 +220,7 @@ Windows 发布包不包含官方 Codex，也不包含 `codex-patched-app`。
 Windows zip 校验：
 
 ```text
-SHA256: 7EB9D91100B65C0E4FE133ACDFC1AFFC181FA655C837A37986E8F9C6B8EA07FE
+SHA256: A238702BCDD2162831CEA4E042949EE6283D4EAA0B5A337BF3402AB340222A04
 ```
 
 ---

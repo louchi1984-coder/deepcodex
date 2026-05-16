@@ -35,6 +35,7 @@ const UPSTREAM = (process.env.UPSTREAM_URL || "https://api.deepseek.com/v1").rep
 const UPSTREAM_KEY = process.env.UPSTREAM_API_KEY || "";
 const PROFILE_PATH = process.env.TRANSLATOR_PROFILE_PATH || "";
 const MAX_TOOL_LOOPS = Number(process.env.TRANSLATOR_MAX_TOOL_LOOPS || 12);
+const MAX_FAKE_TOOL_CLAIM_REPLAYS = Number(process.env.TRANSLATOR_MAX_FAKE_TOOL_CLAIM_REPLAYS || 2);
 const MAX_RESTORED_INPUT_ITEMS = Number(process.env.TRANSLATOR_MAX_RESTORED_INPUT_ITEMS || 220);
 const DEBUG_UPSTREAM = process.env.DEEPCODEX_DEBUG_UPSTREAM === "1" || process.env.TRANSLATOR_DEBUG_UPSTREAM === "1";
 const RESPONSES_PATHS = new Set(["/responses", "/v1/responses", "/responses/compact", "/v1/responses/compact"]);
@@ -943,10 +944,20 @@ function assistantTextLooksLikeUnsupportedToolClaim(text) {
     const value = String(text || "").trim();
     if (!value) return false;
     const compact = value.replace(/\s+/g, " ");
-    const zhFuture = /(?:先|现在|马上|接下来|继续|我来|开始|准备|直接).{0,36}(?:读|读取|查看|检查|搜|搜索|运行|执行|安装|启动|生成|创建|写|写入|修改|补丁|打补丁|patch|渲染|导出|移动|复制|删除|下载|打开|跑)/i;
     const zhDone = /(?:已|已经|刚才|我(?:已经)?|这里|现在).{0,36}(?:读完|读取|查看|检查|搜到|搜索到|运行|执行|安装|启动|生成|创建|写入|修改|补丁|打上|渲染|导出|移动|复制|删除|下载|打开|跑起来|跑完)/i;
     const enClaim = /\b(?:I\s+(?:have\s+)?(?:installed|started|ran|read|generated|moved|copied|searched|fetched|opened|wrote|patched|downloaded|rendered)|(?:installed|started|ran|read|generated|moved|copied|searched|fetched|opened|wrote|patched|downloaded|rendered)\b)/i;
-    return zhFuture.test(compact) || zhDone.test(compact) || enClaim.test(compact);
+    return assistantTextLooksLikeFutureToolPromise(compact) || zhDone.test(compact) || enClaim.test(compact);
+}
+
+function assistantTextLooksLikeFutureToolPromise(text) {
+    const value = String(text || "").trim();
+    if (!value) return false;
+    const compact = value.replace(/\s+/g, " ");
+    const zhFuture = /(?:先|现在|马上|接下来|继续|我来|开始|准备|直接).{0,36}(?:读|读取|查看|检查|搜|搜索|运行|执行|安装|启动|生成|创建|写|写入|修改|补丁|打补丁|patch|渲染|导出|移动|复制|删除|下载|打开|跑)/i;
+    const zhCommandPromise = /(?:先|现在|马上|接下来|继续|我来|开始|准备|直接|然后|用|使用).{0,48}(?:npm|npx|pnpm|yarn|node|python|pip|powershell|cmd|bash|git|curl|remotion|vite|hyperframes|ffmpeg|magick|robocopy|copy-item|start-process)\b/i;
+    const zhThenAction = /(?:确认|检查|看一下|看看|读一下|读完|看完).{0,48}(?:然后|再|后).{0,24}(?:启动|运行|执行|安装|生成|写入|修改|渲染|导出|复制|移动|打开|跑)/i;
+    const enCommandPromise = /\b(?:I(?:'ll| will| am going to)?|let me|now|next|then|directly)\b.{0,60}\b(?:npm|npx|pnpm|yarn|node|python|pip|powershell|cmd|bash|git|curl|remotion|vite|hyperframes|ffmpeg|magick|robocopy)\b/i;
+    return zhFuture.test(compact) || zhCommandPromise.test(compact) || zhThenAction.test(compact) || enCommandPromise.test(compact);
 }
 
 function blockedToolClaimMessage() {
@@ -957,13 +968,43 @@ function blockedToolClaimMessage() {
     ].join("\n");
 }
 
-function guardAssistantToolClaims(output) {
+function fakeToolClaimRelayPrompt() {
+    return [
+        blockedToolClaimMessage(),
+        "",
+        "这不是最终回答。继续当前任务：如果需要读文件、运行命令、安装依赖、启动服务、生成文件、移动文件或搜索网页，必须现在调用可用工具。",
+        "不要再次只用自然语言承诺“我来执行/我直接用命令/我已经完成”。",
+        "如果当前路由确实没有所需工具，明确说明哪个工具不可用以及下一步需要用户做什么。",
+    ].join("\n");
+}
+
+function requestHasToolEvidence(originalRequest) {
+    const input = Array.isArray(originalRequest?.input) ? originalRequest.input : [];
+    return input.some(item => item?.type === "function_call_output" || item?.type === "custom_tool_call_output" || item?.role === "tool");
+}
+
+function messagesHaveToolEvidence(messages) {
+    return Array.isArray(messages) && messages.some(message => message?.role === "tool");
+}
+
+function shouldBlockAssistantToolClaim(text, { hasToolEvidence = false, hasToolCall = false } = {}) {
+    if (hasToolCall) return false;
+    if (!assistantTextLooksLikeUnsupportedToolClaim(text)) return false;
+    // Once the turn already has real tool evidence, completion summaries like
+    // "已经读取/已经写入" are legitimate. Still block future-action promises
+    // that would otherwise end a turn without actually calling the tool.
+    if (hasToolEvidence && !assistantTextLooksLikeFutureToolPromise(text)) return false;
+    return true;
+}
+
+function guardAssistantToolClaims(output, originalRequest = null) {
     if (responseOutputHasToolCall(output)) return output;
+    const hasPriorToolEvidence = requestHasToolEvidence(originalRequestFromArg(originalRequest));
     let changed = false;
     const guarded = output.map(item => {
         if (item?.type !== "message" || !Array.isArray(item.content)) return item;
         const nextContent = item.content.map(part => {
-            if (part?.type !== "output_text" || !assistantTextLooksLikeUnsupportedToolClaim(part.text)) return part;
+            if (part?.type !== "output_text" || !shouldBlockAssistantToolClaim(part.text, { hasToolEvidence: hasPriorToolEvidence })) return part;
             changed = true;
             return { ...part, text: blockedToolClaimMessage() };
         });
@@ -1019,7 +1060,7 @@ function chatToResponsesFormat(json, original, routing = null) {
         created: json.created || Math.floor(Date.now() / 1000),
         model: json.model || originalRequest.model || "gpt-5.5",
         status: responseStatus(finishReason),
-        output: guardAssistantToolClaims(output),
+        output: guardAssistantToolClaims(output, originalRequest),
         usage: mapUsage(json.usage),
         finishReason,
     });
@@ -1030,6 +1071,7 @@ function chatToResponsesFormat(json, original, routing = null) {
 async function callUpstreamWithInternalTools(body) {
     const working = { ...body, stream: false, messages: [...(body.messages || [])] };
     const executedInternalCalls = new Set();
+    let fakeToolClaimReplays = 0;
 
     const toolLoopReasonText = (reason) => {
         if (reason === "repeated_internal_tool_call") return "模型重复请求了同一个内部工具";
@@ -1097,6 +1139,21 @@ async function callUpstreamWithInternalTools(body) {
             ...pseudoInternalCalls,
         ];
         if (internalCalls.length === 0) {
+            const hasExternalCalls = standardExternalCalls.length > 0 || pseudoExternalCalls.length > 0;
+            const assistantText = extractAssistantText(json);
+            const shouldRelayFakeClaim = shouldBlockAssistantToolClaim(assistantText, {
+                hasToolEvidence: messagesHaveToolEvidence(working.messages),
+                hasToolCall: hasExternalCalls,
+            });
+            if (shouldRelayFakeClaim) {
+                if (fakeToolClaimReplays < MAX_FAKE_TOOL_CLAIM_REPLAYS) {
+                    fakeToolClaimReplays += 1;
+                    working.messages.push({ role: "assistant", content: assistantText || "" });
+                    working.messages.push({ role: "user", content: fakeToolClaimRelayPrompt() });
+                    continue;
+                }
+                return { ok: true, status: 200, json: makeTextCompletion(working.model, blockedToolClaimMessage()) };
+            }
             if (pseudoExternalCalls.length > 0) {
                 const next = structuredClone(json);
                 next.choices[0].message = {
@@ -1425,7 +1482,10 @@ class ChatToResponsesStreamMapper {
             items.push([this.reasoning.outputIndex, { id: this.reasoning.id, type: "reasoning", status: "completed", summary: [], encrypted_content: encodeReasoningContent(this.reasoning.content) }]);
         }
         if (this.textOutputIndex !== null) {
-            const text = this.toolCalls.size === 0 && assistantTextLooksLikeUnsupportedToolClaim(this.text)
+            const text = shouldBlockAssistantToolClaim(this.text, {
+                hasToolEvidence: requestHasToolEvidence(this.original),
+                hasToolCall: this.toolCalls.size > 0,
+            })
                 ? blockedToolClaimMessage()
                 : sanitizeMarkdownUrlFormatting(this.text);
             items.push([this.textOutputIndex, { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] }]);
@@ -1458,7 +1518,10 @@ class ChatToResponsesStreamMapper {
             }]);
         }
         if (this.textOutputIndex !== null) {
-            const text = this.toolCalls.size === 0 && assistantTextLooksLikeUnsupportedToolClaim(this.text)
+            const text = shouldBlockAssistantToolClaim(this.text, {
+                hasToolEvidence: requestHasToolEvidence(this.original),
+                hasToolCall: this.toolCalls.size > 0,
+            })
                 ? blockedToolClaimMessage()
                 : sanitizeMarkdownUrlFormatting(this.text);
             const item = { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] };
