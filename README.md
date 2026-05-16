@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/codex-deepseek-icon-final.png" alt="deepcodex logo" width="120">
+  <img src="assets/deepcodex-readme-banner.svg" alt="deepcodex banner">
 </p>
 
 <h1 align="center">deepcodex</h1>
@@ -11,6 +11,10 @@
 </p>
 
 <p align="center">
+  沟通联系：抖音 / 视频号 <strong>@娄老师说的对</strong>
+</p>
+
+<p align="center">
   <strong>macOS 可用</strong> · <strong>Windows beta</strong> · <strong>DeepSeek API key</strong> · <strong>非商业使用</strong>
 </p>
 
@@ -18,16 +22,19 @@
 
 ## 一句话
 
-**deepcodex = Codex Desktop 的使用手感 + DeepSeek 的模型路线。**
+**deepcodex = 可双开的 Codex Desktop + DeepSeek 路线。**
 
 它不是重写一个 IDE，也不是另起一套插件生态。  
-它做的是一个更克制的事：在本机保留 Codex Desktop 的 runtime、UI 和工作流，同时通过本地 translator 把模型请求转到 DeepSeek。
+它做的是一个更克制、也更实用的事：在本机保留 Codex Desktop 的 runtime、UI 和工作流，同时用独立入口、独立图标和本地 translator，把模型请求转到 DeepSeek。
 
-适合这些人：
+核心卖点：
 
-- 想继续用 Codex Desktop 的交互，但希望接入 DeepSeek
-- 想研究 Codex runtime、Responses/Chat 翻译、工具调用兼容层
-- 能接受 preview 阶段的边界，而不是期待一个“全自动商业发行版”
+- **可双开**：原版 Codex 和 deepcodex 可以并存使用
+- **独立入口 / 独立 logo**：像一个单独的 app，而不是改坏原版 Codex
+- **首次直接输入 DeepSeek API key**：连通后自动保存，不需要手动折腾终端
+- **近乎完整的兼容层**：Responses ↔ Chat、tool calls、DSML、compaction、web_search/web_fetch 都做了适配
+- **插件 / skill 尽量兼容**：共享 Codex 的插件、skill、MCP 配置和本地工具生态，不再自己造一套孤岛
+- **复用 Codex 的工作流**：继续用熟悉的项目、工具和开发节奏
 
 ---
 
@@ -73,13 +80,14 @@ deepcodex 不打包官方 Codex，也不修改官方 Codex app 本体。
 ## 现在能做什么
 
 - 独立入口和独立图标：`DeepCodex.app` / `DeepCodex.exe`
+- 支持和原版 Codex 双开，适合同时保留 OpenAI 路线和 DeepSeek 路线
 - 首次输入 DeepSeek API key，之后直接进入
 - 本地 translator：Responses ↔ Chat 协议翻译
 - DeepSeek 工具调用兼容：function/custom/namespace 工具映射
 - DSML 伪工具调用处理，避免直接吐给用户
 - 本地 `web_search` / `web_fetch` 降级工具
 - 上下文压缩续接修复，减少压缩后“什么都忘了”
-- 与 Codex 插件/skill 目录共享，尽量沿用官方宿主生态
+- 共享 Codex 插件 / skill / MCP 配置，常规插件入口和本地 skill 尽量沿用官方宿主生态
 
 对大多数文本、代码、项目修改类任务来说，macOS 版已经能稳定工作；Windows 版目前是 beta / preview。
 
