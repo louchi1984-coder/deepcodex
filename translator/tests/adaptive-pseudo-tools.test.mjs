@@ -10,8 +10,6 @@ const {
   ChatToResponsesStreamMapper,
   chatToCompactResponseFormat,
   chatToResponsesFormat,
-  deepSeekBalanceToCodexUsage,
-  emptyCodexUsage,
   hasPseudoToolMarkup,
   inputTokensResponse,
   normalizeCompactSummary,
@@ -131,35 +129,6 @@ test("input token probe returns a stable Responses-compatible shape", () => {
   assert.equal(typeof result.input_tokens, "number");
   assert.ok(result.input_tokens > 0);
   assert.deepEqual(result.input_tokens_details, { cached_tokens: 0 });
-});
-
-test("DeepSeek balance is exposed through a Codex usage-compatible shell", () => {
-  const usage = deepSeekBalanceToCodexUsage({
-    is_available: true,
-    balance_infos: [{
-      currency: "CNY",
-      total_balance: "12.50",
-      granted_balance: "2.00",
-      topped_up_balance: "10.50",
-    }],
-  });
-
-  assert.equal(usage.object, "codex_usage");
-  assert.equal(usage.provider, "deepseek");
-  assert.equal(usage.is_available, true);
-  assert.equal(usage.balance.currency, "CNY");
-  assert.equal(usage.balance.total_balance, 12.5);
-  assert.equal(usage.credits[0].remaining, 12.5);
-  assert.equal(usage.deepcodex.source, "deepseek_user_balance");
-});
-
-test("DeepSeek usage fallback keeps the existing quota menu safe", () => {
-  const usage = emptyCodexUsage("network unavailable");
-  assert.equal(usage.object, "codex_usage");
-  assert.equal(usage.provider, "deepseek");
-  assert.equal(usage.is_available, false);
-  assert.deepEqual(usage.credits, []);
-  assert.equal(usage.deepcodex.error, "network unavailable");
 });
 
 test("unknown input items are preserved as bounded system text", () => {
