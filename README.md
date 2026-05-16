@@ -5,98 +5,87 @@
 <h1 align="center">deepcodex</h1>
 
 <p align="center">
-  Codex Desktop + DeepSeek route patch
+  把 Codex Desktop 接到 DeepSeek 的本地补丁。
+  <br>
+  A local patch that routes Codex Desktop through DeepSeek.
 </p>
 
-把 Codex Desktop 接到 DeepSeek 上的轻量补丁。
-
-Lightweight desktop patch that routes Codex Desktop through DeepSeek while keeping the familiar Codex workflow.
-
-> **Platform**
->  
-> **macOS**: 可用。  
-> **Windows**: beta / preview。
->
-> **macOS**: available.  
-> **Windows**: beta / preview.
-
-> **License / 使用限制**
->  
-> 本项目当前仅允许个人学习、研究和非商业使用。  
-> **禁止商用、转售、托管服务、付费集成或任何形式的商业化再分发。**
->
-> Personal, research, and non-commercial use only.  
-> **Commercial use, resale, hosted services, paid integrations, and commercial redistribution are not allowed.**
-
-## 获取教程 / 更新 / 反馈
-
-想看安装教程、使用演示、更新说明，或使用中遇到问题，可以到抖音 / 视频号关注并联系：
-
-```text
-@娄老师说的对
-```
-
-## 建议更新到最新版
-
-如果你已经安装过早期版本，建议重新下载并安装最新版。
-
-近期版本重点修复了 translator 兼容层，包括上下文压缩续接、DSML 伪工具调用、`web_search` / `web_fetch` 本地工具回灌，以及部分 DeepSeek 脏输出导致的断流问题。旧版本如果遇到 `Reconnecting...`、工具调用直接吐到聊天里、压缩后记忆明显丢失等情况，优先升级最新版再测试。
-
-macOS 用户直接用新版 DMG 覆盖安装即可。Windows beta 用户建议下载最新 zip 后重新运行 `install-windows.bat`。
+<p align="center">
+  <strong>macOS 可用</strong> · <strong>Windows beta</strong> · <strong>DeepSeek API key</strong> · <strong>非商业使用</strong>
+</p>
 
 ---
 
-它不重做 IDE，也不重写一整套插件生态。  
-它只做几件关键的事：
+## 一句话
 
-- 保留 Codex Desktop 原本的使用手感
-- 增加 DeepSeek API key 登录入口
-- 用本地 translator 把 Codex 请求转给 DeepSeek
-- 给 deepcodex 保留一套独立工作区 / 状态目录
+**deepcodex = Codex Desktop 的使用手感 + DeepSeek 的模型路线。**
 
-一句话：
+它不是重写一个 IDE，也不是另起一套插件生态。  
+它做的是一个更克制的事：在本机保留 Codex Desktop 的 runtime、UI 和工作流，同时通过本地 translator 把模型请求转到 DeepSeek。
 
-> **deepcodex = Codex Desktop + DeepSeek 路由补丁**
+适合这些人：
 
----
-
-## Quick Start
-
-Prerequisite: install **Codex Desktop** first. deepcodex will automatically locate the local Codex Desktop app and attach to it.
-
-macOS:
-
-1. Download `deepcodex-macos-2026.05.16.dmg` from the GitHub Release
-2. Open the DMG and drag `DeepCodex.app` to `Applications`
-3. Open `DeepCodex`
-4. Enter your DeepSeek API key
-
-Windows beta:
-
-1. Download `deepcodex-windows-v0.1.5-preview.zip`
-2. Unzip it
-3. Double-click `install-windows.bat`
-4. Open `DeepCodex` from the desktop shortcut or Start menu
-5. Enter your DeepSeek API key
-
-The first-run setup UI follows your system/browser language where available: Simplified Chinese for `zh*` locales, English otherwise.
+- 想继续用 Codex Desktop 的交互，但希望接入 DeepSeek
+- 想研究 Codex runtime、Responses/Chat 翻译、工具调用兼容层
+- 能接受 preview 阶段的边界，而不是期待一个“全自动商业发行版”
 
 ---
 
-## 这版能做什么
+## 下载
 
-- 以独立 app 形式启动：`/Applications/deepcodex.app`
-- Windows beta 以 `DeepCodex.exe` 和快捷方式启动
-- 首次输入 DeepSeek API key，之后直接进入 deepcodex
-- 把 Codex 的模型请求转到 DeepSeek
-- 保留 Codex 适合写代码、改项目、做日常开发的交互方式
-- 使用独立工作区 / 独立状态目录，避免和原版 Codex 完全混在一起
+最新版本在 GitHub Release：
+
+[deepcodex v0.1.0-preview](https://github.com/louchi1984-coder/deepcodex/releases/tag/v0.1.0-preview)
+
+| 平台 | 状态 | 下载 |
+| --- | --- | --- |
+| macOS | 可用 | `deepcodex-macos-2026.05.16.dmg` |
+| Windows | beta / preview | `deepcodex-windows-v0.1.5-preview.zip` |
+
+> 已安装旧版的用户建议直接更新。新版重点修复了上下文压缩、DSML 伪工具调用、`web_search` / `web_fetch` 回灌、假工具叙述拦截误判，以及多处 DeepSeek 兼容层问题。
+
+---
+
+## 快速开始
+
+前置要求：先安装官方 **Codex Desktop**。  
+deepcodex 不打包官方 Codex，也不修改官方 Codex app 本体。
+
+### macOS
+
+1. 下载 `deepcodex-macos-2026.05.16.dmg`
+2. 打开 DMG，把 `DeepCodex.app` 拖到 `Applications`
+3. 打开 `DeepCodex`
+4. 输入 DeepSeek API key，连通后自动保存
+
+### Windows beta
+
+1. 下载 `deepcodex-windows-v0.1.5-preview.zip`
+2. 解压
+3. 双击 `install-windows.bat`
+4. 从桌面快捷方式或开始菜单打开 `DeepCodex`
+5. 输入 DeepSeek API key
+
+首次 setup 会尽量保持极简，不要求手动开终端，也不要求用户自己启动额外服务。
+
+---
+
+## 现在能做什么
+
+- 独立入口和独立图标：`DeepCodex.app` / `DeepCodex.exe`
+- 首次输入 DeepSeek API key，之后直接进入
+- 本地 translator：Responses ↔ Chat 协议翻译
+- DeepSeek 工具调用兼容：function/custom/namespace 工具映射
+- DSML 伪工具调用处理，避免直接吐给用户
+- 本地 `web_search` / `web_fetch` 降级工具
+- 上下文压缩续接修复，减少压缩后“什么都忘了”
+- 与 Codex 插件/skill 目录共享，尽量沿用官方宿主生态
 
 对大多数文本、代码、项目修改类任务来说，macOS 版已经能稳定工作；Windows 版目前是 beta / preview。
 
 ---
 
-## 这版不是什么
+## 当前边界
 
 deepcodex 现在**不是**：
 
@@ -114,7 +103,28 @@ deepcodex 现在**不是**：
 
 ---
 
-## 产品定位
+## 使用限制
+
+本项目当前仅允许个人学习、研究和非商业使用。
+
+**禁止商用、转售、托管服务、付费集成或任何形式的商业化再分发。**
+
+Personal, research, and non-commercial use only.  
+Commercial use, resale, hosted services, paid integrations, and commercial redistribution are not allowed.
+
+---
+
+## 教程 / 更新 / 反馈
+
+想看安装教程、使用演示、更新说明，或使用中遇到问题，可以到抖音 / 视频号关注并联系：
+
+```text
+@娄老师说的对
+```
+
+---
+
+## 架构定位
 
 这版的核心其实只有三件事：
 
