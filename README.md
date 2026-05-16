@@ -11,10 +11,6 @@
 </p>
 
 <p align="center">
-  沟通联系：抖音 / 视频号 <strong>@娄老师说的对</strong>
-</p>
-
-<p align="center">
   <strong>macOS 可用</strong> · <strong>Windows beta</strong> · <strong>DeepSeek API key</strong> · <strong>非商业使用</strong>
 </p>
 
@@ -35,6 +31,8 @@
 - **近乎完整的兼容层**：Responses ↔ Chat、tool calls、DSML、compaction、web_search/web_fetch 都做了适配
 - **插件 / skill 尽量兼容**：共享 Codex 的插件、skill、MCP 配置和本地工具生态，不再自己造一套孤岛
 - **复用 Codex 的工作流**：继续用熟悉的项目、工具和开发节奏
+
+交流反馈：抖音 / 视频号 **@娄老师说的对**
 
 ---
 
