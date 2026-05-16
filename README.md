@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/deepcodex-readme-banner.svg" alt="deepcodex banner">
+  <img src="assets/codex-deepseek-icon-final.png" alt="deepcodex logo" width="120">
 </p>
 
 <h1 align="center">deepcodex</h1>
