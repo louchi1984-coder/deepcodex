@@ -273,6 +273,45 @@ test("chat response still blocks future action promise even when prior tool evid
   assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
 });
 
+test("chat response blocks web_search unavailable claim when only exec_command failed", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "现在搜了，但 web_search 真的暂时不可用，只能基于已有信息回答。" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_exec", name: "exec_command", arguments: "{\"cmd\":\"curl https://example.com\"}" },
+      { type: "function_call_output", call_id: "call_exec", output: "curl: network is unreachable" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /web_search\/web_fetch 不可用/);
+  assert.match(formatted.output[0].content[0].text, /exec_command 的网络失败/);
+});
+
+test("chat response allows web_search unavailable claim after matching web_search failure output", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "web_search 返回失败，当前没有可靠搜索结果。" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_search", name: "web_search", arguments: "{\"query\":\"Remotion examples\"}" },
+      { type: "function_call_output", call_id: "call_search", output: "{\"ok\":false,\"error\":\"network blocked\"}" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.equal(formatted.output[0].content[0].text, "web_search 返回失败，当前没有可靠搜索结果。");
+});
+
 test("chat custom tool calls become completed Responses custom_tool_call items", () => {
   const formatted = chatToResponsesFormat({
     choices: [{

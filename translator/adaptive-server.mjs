@@ -187,8 +187,9 @@ function buildSystemBlock() {
         lines.push("- Do not use web_search for purely local codebase facts, conversation memory, or information already present in the prompt.");
         lines.push("- Treat web_search as discovery only. After search returns candidate links, use web_fetch on the most relevant original/source pages before making specific claims.");
         lines.push("- Prefer primary sources and official docs. Avoid relying on search result snippets when an original page can be fetched.");
-        lines.push("- If search/fetch fails or returns weak evidence, say that web access is unavailable or inconclusive instead of guessing.");
-        lines.push("- Include source URLs in the answer whenever web tools materially affect the answer.");
+    lines.push("- If search/fetch fails or returns weak evidence, say that web access is unavailable or inconclusive instead of guessing.");
+    lines.push("- Include source URLs in the answer whenever web tools materially affect the answer.");
+    lines.push("- Only say web_search or web_fetch is unavailable after an actual web_search/web_fetch tool call returned a failure. Shell/exec_command network failure is not web_search failure.");
     }
 
     lines.push("");
@@ -198,6 +199,7 @@ function buildSystemBlock() {
     lines.push("- For requests like 找一找, 搜索, 查案例, 看看 GitHub, use an available web_search/web_fetch/browser/shell tool before giving concrete external examples or URLs.");
     lines.push("- If no suitable tool is available or the tool fails, say plainly that you do not have actual search results in this turn and ask for a URL or permission/input as needed.");
     lines.push("- Do not invent URLs, repositories, examples, or source claims from memory when the user asked to search.");
+    lines.push("- Never convert shell, curl, npm, browser, or exec_command network failures into \"web_search unavailable\" unless web_search itself was actually called and failed.");
     lines.push("- Do not end a turn with a future-action promise such as \"now I will read\", \"next I will patch\", \"开始读文件\", \"准备打补丁\", or \"继续处理\" unless you emit the matching tool call in the same response.");
     lines.push("- If the next step is to read, inspect, run, edit, patch, write, or verify, call the appropriate tool now. If you cannot call the tool, say exactly why and do not claim the action is about to happen.");
     lines.push("- After a tool failure, either retry with a valid tool call in the same turn or give a final factual blocker. Do not reply only with a promise to retry later.");
@@ -940,6 +942,15 @@ function responseOutputHasToolCall(output) {
     return Array.isArray(output) && output.some(item => item?.type === "function_call" || item?.type === "custom_tool_call");
 }
 
+function assistantTextLooksLikeWebToolUnavailableClaim(text) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (!value) return false;
+    const namesWebTool = /\bweb[_ -]?(?:search|fetch)\b/i.test(value);
+    const namesSearchTool = /(?:搜索|检索|抓取|网页|联网|网络).{0,12}(?:工具|tool)/i.test(value);
+    if (!namesWebTool && !namesSearchTool) return false;
+    return /(?:不可用|不能用|无法使用|暂时不可用|没有可用|未启用|不可访问|失败|unavailable|not available|disabled|unsupported|not supported|failed)/i.test(value);
+}
+
 function assistantTextLooksLikeUnsupportedToolClaim(text) {
     const value = String(text || "").trim();
     if (!value) return false;
@@ -968,6 +979,14 @@ function blockedToolClaimMessage() {
     ].join("\n");
 }
 
+function webToolUnavailableClaimMessage() {
+    return [
+        "DeepCodex 已拦截这轮回复：模型声称 web_search/web_fetch 不可用，但本轮或已恢复历史里没有对应的 web_search/web_fetch 失败结果。",
+        "实际状态：shell、curl、npm、browser 或 exec_command 的网络失败，不能等同于 web_search/web_fetch 不可用。",
+        "请继续时必须真实调用 web_search/web_fetch，或只说明具体哪个已执行工具失败；不能伪造 web_search 结果。",
+    ].join("\n");
+}
+
 function fakeToolClaimRelayPrompt() {
     return [
         blockedToolClaimMessage(),
@@ -978,17 +997,77 @@ function fakeToolClaimRelayPrompt() {
     ].join("\n");
 }
 
+function webToolUnavailableRelayPrompt() {
+    return [
+        webToolUnavailableClaimMessage(),
+        "",
+        "这不是最终回答。继续当前任务：如果用户请求搜索/查资料/找案例，必须现在调用 web_search 或 web_fetch。",
+        "如果你只运行过 shell/exec_command 并且它访问外网失败，只能说 shell/exec_command 网络访问失败；不要说 web_search 不可用。",
+    ].join("\n");
+}
+
 function requestHasToolEvidence(originalRequest) {
     const input = Array.isArray(originalRequest?.input) ? originalRequest.input : [];
     return input.some(item => item?.type === "function_call_output" || item?.type === "custom_tool_call_output" || item?.role === "tool");
+}
+
+function requestHasToolOutputFor(originalRequest, names = []) {
+    const wanted = new Set(names);
+    const input = Array.isArray(originalRequest?.input) ? originalRequest.input : [];
+    const callNames = new Map();
+    for (const item of input) {
+        if (!item || typeof item !== "object") continue;
+        if ((item.type === "function_call" || item.type === "custom_tool_call") && item.name) {
+            const callId = item.call_id || item.id;
+            if (callId) callNames.set(callId, item.name);
+        }
+        if (item.type === "message" && item.role === "assistant" && Array.isArray(item.tool_calls)) {
+            for (const tc of item.tool_calls) {
+                const callId = tc?.id || tc?.call_id;
+                const name = tc?.function?.name || tc?.name;
+                if (callId && name) callNames.set(callId, name);
+            }
+        }
+    }
+    for (const item of input) {
+        if (!item || typeof item !== "object") continue;
+        if (item.type !== "function_call_output" && item.type !== "custom_tool_call_output" && item.role !== "tool") continue;
+        const directName = item.name || item.tool_name;
+        if (directName && wanted.has(directName)) return true;
+        const callId = item.call_id || item.tool_call_id || item.id;
+        if (callId && wanted.has(callNames.get(callId))) return true;
+    }
+    return false;
 }
 
 function messagesHaveToolEvidence(messages) {
     return Array.isArray(messages) && messages.some(message => message?.role === "tool");
 }
 
-function shouldBlockAssistantToolClaim(text, { hasToolEvidence = false, hasToolCall = false } = {}) {
+function messagesHaveToolOutputFor(messages, names = []) {
+    const wanted = new Set(names);
+    const callNames = new Map();
+    for (const message of messages || []) {
+        if (message?.role !== "assistant" || !Array.isArray(message.tool_calls)) continue;
+        for (const tc of message.tool_calls) {
+            const callId = tc?.id || tc?.call_id;
+            const name = tc?.function?.name || tc?.name;
+            if (callId && name) callNames.set(callId, name);
+        }
+    }
+    for (const message of messages || []) {
+        if (message?.role !== "tool") continue;
+        const directName = message.name || message.tool_name;
+        if (directName && wanted.has(directName)) return true;
+        const callId = message.tool_call_id || message.call_id || message.id;
+        if (callId && wanted.has(callNames.get(callId))) return true;
+    }
+    return false;
+}
+
+function shouldBlockAssistantToolClaim(text, { hasToolEvidence = false, hasToolCall = false, hasWebToolEvidence = false } = {}) {
     if (hasToolCall) return false;
+    if (assistantTextLooksLikeWebToolUnavailableClaim(text) && !hasWebToolEvidence) return true;
     if (!assistantTextLooksLikeUnsupportedToolClaim(text)) return false;
     // Once the turn already has real tool evidence, completion summaries like
     // "已经读取/已经写入" are legitimate. Still block future-action promises
@@ -997,16 +1076,32 @@ function shouldBlockAssistantToolClaim(text, { hasToolEvidence = false, hasToolC
     return true;
 }
 
+function blockedToolClaimMessageFor(text, context = {}) {
+    if (assistantTextLooksLikeWebToolUnavailableClaim(text) && !context.hasWebToolEvidence) {
+        return webToolUnavailableClaimMessage();
+    }
+    return blockedToolClaimMessage();
+}
+
+function fakeToolClaimRelayPromptFor(text, context = {}) {
+    if (assistantTextLooksLikeWebToolUnavailableClaim(text) && !context.hasWebToolEvidence) {
+        return webToolUnavailableRelayPrompt();
+    }
+    return fakeToolClaimRelayPrompt();
+}
+
 function guardAssistantToolClaims(output, originalRequest = null) {
     if (responseOutputHasToolCall(output)) return output;
-    const hasPriorToolEvidence = requestHasToolEvidence(originalRequestFromArg(originalRequest));
+    const request = originalRequestFromArg(originalRequest);
+    const hasPriorToolEvidence = requestHasToolEvidence(request);
+    const hasWebToolEvidence = requestHasToolOutputFor(request, ["web_search", "web_fetch"]);
     let changed = false;
     const guarded = output.map(item => {
         if (item?.type !== "message" || !Array.isArray(item.content)) return item;
         const nextContent = item.content.map(part => {
-            if (part?.type !== "output_text" || !shouldBlockAssistantToolClaim(part.text, { hasToolEvidence: hasPriorToolEvidence })) return part;
+            if (part?.type !== "output_text" || !shouldBlockAssistantToolClaim(part.text, { hasToolEvidence: hasPriorToolEvidence, hasWebToolEvidence })) return part;
             changed = true;
-            return { ...part, text: blockedToolClaimMessage() };
+            return { ...part, text: blockedToolClaimMessageFor(part.text, { hasWebToolEvidence }) };
         });
         return nextContent === item.content ? item : { ...item, content: nextContent };
     });
@@ -1141,18 +1236,21 @@ async function callUpstreamWithInternalTools(body) {
         if (internalCalls.length === 0) {
             const hasExternalCalls = standardExternalCalls.length > 0 || pseudoExternalCalls.length > 0;
             const assistantText = extractAssistantText(json);
+            const hasToolEvidence = messagesHaveToolEvidence(working.messages);
+            const hasWebToolEvidence = messagesHaveToolOutputFor(working.messages, ["web_search", "web_fetch"]);
             const shouldRelayFakeClaim = shouldBlockAssistantToolClaim(assistantText, {
-                hasToolEvidence: messagesHaveToolEvidence(working.messages),
+                hasToolEvidence,
+                hasWebToolEvidence,
                 hasToolCall: hasExternalCalls,
             });
             if (shouldRelayFakeClaim) {
                 if (fakeToolClaimReplays < MAX_FAKE_TOOL_CLAIM_REPLAYS) {
                     fakeToolClaimReplays += 1;
                     working.messages.push({ role: "assistant", content: assistantText || "" });
-                    working.messages.push({ role: "user", content: fakeToolClaimRelayPrompt() });
+                    working.messages.push({ role: "user", content: fakeToolClaimRelayPromptFor(assistantText, { hasWebToolEvidence }) });
                     continue;
                 }
-                return { ok: true, status: 200, json: makeTextCompletion(working.model, blockedToolClaimMessage()) };
+                return { ok: true, status: 200, json: makeTextCompletion(working.model, blockedToolClaimMessageFor(assistantText, { hasWebToolEvidence })) };
             }
             if (pseudoExternalCalls.length > 0) {
                 const next = structuredClone(json);
