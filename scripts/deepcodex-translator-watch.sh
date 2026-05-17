@@ -9,7 +9,6 @@ TRANSLATOR_PID_FILE="${TRANSLATOR_PID_FILE:-$DEEPCODEX_STATE_ROOT/adaptive-trans
 TRANSLATOR_WATCH_PID_FILE="${TRANSLATOR_WATCH_PID_FILE:-$DEEPCODEX_STATE_ROOT/adaptive-translator-watch.pid}"
 TRANSLATOR_PROFILE_PATH="${TRANSLATOR_PROFILE_PATH:-$DEEPCODEX_STATE_ROOT/codex-home-deepseek-app/provider-profile.json}"
 UPSTREAM_URL="${UPSTREAM_URL:-https://api.deepseek.com/v1}"
-DEEPCODEX_UI_PATTERN="${DEEPCODEX_UI_PATTERN:-Codex.*--user-data-dir=.*Application Support/deepcodex}"
 DEEPCODEX_WATCH_GRACE_SECONDS="${DEEPCODEX_WATCH_GRACE_SECONDS:-10}"
 
 mkdir -p "$DEEPCODEX_STATE_ROOT"
@@ -24,7 +23,11 @@ translator_alive() {
 }
 
 ui_alive() {
-  pgrep -f "$DEEPCODEX_UI_PATTERN" >/dev/null 2>&1
+  ps -axo command= \
+    | grep -F "/Applications/Codex.app/Contents/MacOS/Codex" \
+    | grep -F -- "--user-data-dir=" \
+    | grep -F "Application Support/deepcodex/" \
+    >/dev/null 2>&1
 }
 
 start_translator() {
