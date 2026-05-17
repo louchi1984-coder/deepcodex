@@ -10,6 +10,7 @@ const {
   ChatToResponsesStreamMapper,
   chatToCompactResponseFormat,
   chatToResponsesFormat,
+  classifyUpstreamFailure,
   hasPseudoToolMarkup,
   inputTokensResponse,
   normalizeCompactSummary,
@@ -19,6 +20,7 @@ const {
   sanitizeMarkdownUrlFormatting,
   stripPseudoToolMarkup,
   unknownInputItemText,
+  usageDiagnostics,
 } = await import("../adaptive-server.mjs");
 
 const dsmlFetch = `最后抓一下 163 那篇比较全面的伤亡统计文章，确认乌克兰方面的完整数据：
@@ -155,7 +157,7 @@ test("markdown sanitizer unwraps bold local URLs without touching normal text", 
   );
 });
 
-test("chat completions are wrapped with a VibeAround-style Responses shell", () => {
+test("chat completions are wrapped with a full Responses shell", () => {
   const formatted = chatToResponsesFormat({
     id: "chatcmpl_123",
     created: 123,
@@ -212,6 +214,75 @@ test("chat finish_reason maps to Responses incomplete status", () => {
 
   assert.equal(formatted.status, "incomplete");
   assert.deepEqual(formatted.incomplete_details, { reason: "max_output_tokens" });
+});
+
+test("DeepSeek prompt cache usage fields map to Responses cached tokens", () => {
+  const formatted = chatToResponsesFormat({
+    id: "chatcmpl_cache",
+    model: "deepseek-v4-pro",
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "ok" },
+    }],
+    usage: {
+      prompt_tokens: 1000,
+      prompt_cache_hit_tokens: 750,
+      prompt_cache_miss_tokens: 250,
+      completion_tokens: 10,
+      total_tokens: 1010,
+    },
+  }, { model: "gpt-5.5", input: "hello" });
+
+  assert.equal(formatted.usage.input_tokens, 1000);
+  assert.equal(formatted.usage.input_tokens_details.cached_tokens, 750);
+  assert.equal(formatted.usage.output_tokens, 10);
+});
+
+test("usage diagnostics classify cache misses and prompt explosion", () => {
+  assert.deepEqual(usageDiagnostics({
+    prompt_tokens: 60000,
+    prompt_cache_hit_tokens: 0,
+    prompt_cache_miss_tokens: 60000,
+    completion_tokens: 0,
+    total_tokens: 60000,
+  }), {
+    input: 60000,
+    output: 0,
+    total: 60000,
+    cache_hit: 0,
+    cache_miss: 60000,
+    flags: ["zero_completion", "cache_miss_large_prompt"],
+  });
+
+  const huge = usageDiagnostics({
+    prompt_tokens: 250000,
+    prompt_tokens_details: { cached_tokens: 100000 },
+    completion_tokens: 20,
+    total_tokens: 250020,
+  });
+  assert.equal(huge.cache_hit, 100000);
+  assert.equal(huge.cache_miss, 150000);
+  assert.deepEqual(huge.flags, ["prompt_explosion"]);
+});
+
+test("upstream failure classifier separates transient, protocol, auth, and quota failures", () => {
+  assert.deepEqual(classifyUpstreamFailure(502, "Bad Gateway").type, "transient_upstream_error");
+  assert.equal(classifyUpstreamFailure(502, "Bad Gateway").retryable, true);
+
+  const protocol = classifyUpstreamFailure(400, "", {
+    error: {
+      message: "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'",
+      type: "invalid_request_error",
+      code: "invalid_request_error",
+    },
+  });
+  assert.equal(protocol.type, "protocol_or_translation_error");
+  assert.equal(protocol.retryable, false);
+  assert.match(protocol.hint, /message\/tool ordering/);
+  assert.equal(protocol.raw_type, "invalid_request_error");
+
+  assert.equal(classifyUpstreamFailure(401, "Invalid API key").type, "auth_error");
+  assert.equal(classifyUpstreamFailure(402, "insufficient quota").type, "quota_or_billing_error");
 });
 
 test("chat response blocks fake tool execution claims without tool calls", () => {
@@ -435,6 +506,25 @@ test("stream mapper blocks direct command promises at completion", () => {
   });
   const completed = done.find(([event]) => event === "response.completed")?.[1];
   assert.match(completed.response.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("stream mapper blocks web_search unavailable claims without web tool evidence", () => {
+  const mapper = new ChatToResponsesStreamMapper({
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", id: "fc_exec", call_id: "call_exec", name: "exec_command", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_exec", output: "curl: failed to connect" },
+    ],
+  }, "gpt-5.5");
+
+  mapper.pushChunk({
+    choices: [{ index: 0, delta: { content: "我试了，web_search 目前不可用，只能靠 shell。" }, finish_reason: null }],
+  });
+  const done = mapper.pushChunk({
+    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+  });
+  const completed = done.find(([event]) => event === "response.completed")?.[1];
+  assert.match(completed.response.output[0].content[0].text, /不能等同于 web_search\/web_fetch 不可用/);
 });
 
 test("native streaming is disabled when translator internal web tools may be needed", () => {
@@ -672,6 +762,21 @@ test("non-assistant empty content is removed before forwarding to Chat", () => {
   assert.equal(body.messages[0].content, "继续");
 });
 
+test("unsupported message roles are preserved as valid system messages", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "message", role: "critic", content: [{ type: "text", text: "role should not break upstream" }] },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.equal(body.messages[0].role, "system");
+  assert.match(body.messages[0].content, /unsupported role "critic"/);
+  assert.match(body.messages[0].content, /role should not break upstream/);
+  assert.equal(body.messages[1].role, "user");
+});
+
 test("readable context_compaction input is preserved with Codex summary prefix", () => {
   const body = responsesToChatBody({
     model: "gpt-5.5",
@@ -723,7 +828,7 @@ test("damaged context_compaction repairs restore and drops noisy tool history", 
   assert.match(body.messages.at(-1).content, /继续修复 compact restore/);
 });
 
-test("healthy long restored history is not truncated by translator item count", () => {
+test("healthy long restored history is capped by translator item count", () => {
   const input = Array.from({ length: 230 }, (_, index) => ({
     type: "message",
     role: index % 2 ? "assistant" : "user",
@@ -735,9 +840,53 @@ test("healthy long restored history is not truncated by translator item count", 
     input,
   }, { allowTools: false, injectInternalTools: false });
 
-  assert.equal(body.messages.length, 230);
-  assert.match(body.messages[0].content, /healthy-history-0/);
+  assert.equal(body.messages.length, 220);
+  assert.match(body.messages[0].content, /healthy-history-10/);
   assert.match(body.messages.at(-1).content, /healthy-history-229/);
+});
+
+test("healthy long restored history keeps the latest compaction summary before capped tail", () => {
+  const input = [
+    { type: "message", role: "user", content: [{ type: "text", text: "old noisy setup" }] },
+    { type: "context_compaction", summary: "压缩摘要：用户正在修复缓存命中，必须保留这个记忆。" },
+    ...Array.from({ length: 230 }, (_, index) => ({
+      type: "message",
+      role: index % 2 ? "assistant" : "user",
+      content: [{ type: "text", text: `tail-history-${index}` }],
+    })),
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.match(body.messages[0].content, /压缩摘要/);
+  assert.match(body.messages[0].content, /缓存命中/);
+  assert.match(body.messages[1].content, /tail-history-10/);
+  assert.match(body.messages.at(-1).content, /tail-history-229/);
+});
+
+test("restored history prunes older tool transcripts while keeping recent tool pairs", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续当前任务。" },
+    ...Array.from({ length: 20 }, (_, index) => ([
+      { type: "function_call", call_id: `call_${index}`, name: "exec_command", arguments: `{"cmd":"echo ${index}"}` },
+      { type: "function_call_output", call_id: `call_${index}`, output: `output-${index} ` + "x".repeat(7000) },
+    ])).flat(),
+    { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.match(body.messages[0].content, /omitted older restored tool transcripts/);
+  assert.ok(!body.messages.some((message) => String(message.content).includes("output-0")), "old tool output is omitted");
+  assert.ok(body.messages.some((message) => String(message.content).includes("output-19")), "recent tool output is preserved");
+  assert.ok(body.messages.some((message) => String(message.content).includes("clipped by DeepCodex translator")), "large tool output is clipped");
+  assert.equal(body.messages.at(-1).role, "user");
 });
 
 test("deepcodex reasoning blob is replayed onto following Chat tool calls", () => {

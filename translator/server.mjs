@@ -4,7 +4,7 @@
  *
  * Receives zstd/gzip-compressed OpenAI Responses API requests from Codex,
  * translates them to Chat Completions format, forwards to the upstream
- * (DeepSeek or a proxy like one-api/LiteLLM), and translates the result
+ * (DeepSeek or another OpenAI-compatible proxy), and translates the result
  * back to Responses format (including SSE streaming).
  *
  * Zero dependencies on CliGate's account/key/routing modules.

@@ -23,6 +23,8 @@ import http from "node:http";
 import zlib from "node:zlib";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { probeCapabilities } from "./probe.mjs";
 import { toolsToInject, executeInternalTool, isInternalTool, getToolChoiceForRole } from "./tools/registry.mjs";
 import { buildChatToolsWithRouting } from "./compat-rules.mjs";
@@ -37,6 +39,8 @@ const PROFILE_PATH = process.env.TRANSLATOR_PROFILE_PATH || "";
 const MAX_TOOL_LOOPS = Number(process.env.TRANSLATOR_MAX_TOOL_LOOPS || 12);
 const MAX_FAKE_TOOL_CLAIM_REPLAYS = Number(process.env.TRANSLATOR_MAX_FAKE_TOOL_CLAIM_REPLAYS || 2);
 const MAX_RESTORED_INPUT_ITEMS = Number(process.env.TRANSLATOR_MAX_RESTORED_INPUT_ITEMS || 220);
+const MAX_RESTORED_TOOL_CALLS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_CALLS || 16);
+const MAX_RESTORED_TOOL_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_OUTPUT_CHARS || 6000);
 const DEBUG_UPSTREAM = process.env.DEEPCODEX_DEBUG_UPSTREAM === "1" || process.env.TRANSLATOR_DEBUG_UPSTREAM === "1";
 const RESPONSES_PATHS = new Set(["/responses", "/v1/responses", "/responses/compact", "/v1/responses/compact"]);
 const REASONING_BLOB_PREFIX = "deepcodex.reasoning.hex.v1:";
@@ -355,6 +359,51 @@ function responseSummary(status, json, text = "") {
     };
 }
 
+function usageDiagnostics(usage) {
+    if (!usage || typeof usage !== "object") return null;
+    const input = Number(usage.prompt_tokens || 0);
+    const output = Number(usage.completion_tokens || 0);
+    const hit = Number(
+        usage.prompt_cache_hit_tokens ??
+        usage.prompt_tokens_details?.cached_tokens ??
+        usage.cache_hit_tokens ??
+        0
+    );
+    const miss = Number(usage.prompt_cache_miss_tokens ?? usage.cache_miss_tokens ?? Math.max(0, input - hit));
+    const flags = [];
+    if (input > 200_000) flags.push("prompt_explosion");
+    if (input > 0 && output === 0) flags.push("zero_completion");
+    if (input > 0 && hit === 0 && input > 50_000) flags.push("cache_miss_large_prompt");
+    return { input, output, total: Number(usage.total_tokens || input + output), cache_hit: hit, cache_miss: miss, flags };
+}
+
+function classifyUpstreamFailure(status, text = "", json = null) {
+    const message = String(json?.error?.message || text || "");
+    const transientStatus = status === 429 || status === 502 || status === 503 || status === 504;
+    const transientText = /connection reset|econnreset|etimedout|timeout|temporarily unavailable|overloaded|rate limit|too many requests|bad gateway|service unavailable|gateway timeout/i.test(message);
+    const protocolText = /invalid_request_error|messages with role 'tool'|tool_calls must be followed|content should be a string or a list|failed to deserialize|missing field|unsupported.*tool|invalid.*tool|schema/i.test(message);
+    const authText = /unauthorized|invalid api key|incorrect api key|authentication|permission denied|forbidden/i.test(message);
+    const quotaText = /insufficient quota|billing|payment|required balance|402|quota/i.test(message);
+    let type = "upstream_error";
+    if (protocolText) type = "protocol_or_translation_error";
+    else if (authText) type = "auth_error";
+    else if (quotaText || status === 402) type = "quota_or_billing_error";
+    else if (transientStatus || transientText) type = "transient_upstream_error";
+    return {
+        type,
+        status,
+        retryable: type === "transient_upstream_error",
+        message: clipForLog(message || `Upstream ${status}`, 500),
+        hint: type === "protocol_or_translation_error"
+            ? "Check Responses↔Chat message/tool ordering and schema conversion."
+            : type === "transient_upstream_error"
+                ? "Upstream/network transient failure; retry is safe only before partial tool output is emitted."
+                : "",
+        raw_type: json?.error?.type || null,
+        raw_code: json?.error?.code || null,
+    };
+}
+
 function debugUpstreamRequest(label, body) {
     if (!DEBUG_UPSTREAM) return null;
     const id = `${Date.now().toString(36)}-${++DEBUG_REQUEST_SEQ}`;
@@ -364,7 +413,10 @@ function debugUpstreamRequest(label, body) {
 
 function debugUpstreamResponse(id, status, json, text) {
     if (!DEBUG_UPSTREAM || !id) return;
-    console.error(`[adaptive][upstream][${id}] response ${JSON.stringify(responseSummary(status, json, text))}`);
+    const summary = responseSummary(status, json, text);
+    if (json?.usage) summary.usage_diagnostics = usageDiagnostics(json.usage);
+    if (status >= 400) summary.failure = classifyUpstreamFailure(status, text, json);
+    console.error(`[adaptive][upstream][${id}] response ${JSON.stringify(summary)}`);
 }
 
 async function postChatCompletion(body, label) {
@@ -494,6 +546,12 @@ function sanitizeChatMessages(messages) {
     return sanitized;
 }
 
+function normalizeMessageRole(role) {
+    if (role === "developer") return "system";
+    if (role === "system" || role === "user" || role === "assistant" || role === "tool") return role;
+    return "system";
+}
+
 function missingToolResultMessage(toolCallId) {
     return {
         role: "tool",
@@ -612,7 +670,7 @@ function responsesToChatBody(parsed, options = {}) {
                 if (activeReasoning && !pendingTC.reasoning_content) pendingTC.reasoning_content = activeReasoning;
                 pendingTC.tool_calls.push({ id: item.call_id || item.id || `call_${Date.now()}`, type: "function", function: { name: item.name, arguments: item.arguments || "{}" } });
             } else {
-                if (item.type === "message") { ensureF(); flushD(); activeReasoning = ""; const role = item.role === "developer" ? "system" : item.role; let content; if (typeof item.content === "string") content = item.content; else if (Array.isArray(item.content)) { content = item.content.map(convertBlock).filter(Boolean); if (content.length > 0 && content.every(c => c.type === "text")) content = content.map(c => c.text).join("\n"); } if (typeof content === "string" && role !== "user" && hasPseudoToolMarkup(content)) content = stripPseudoToolMarkup(content); messages.push({ role, content: content || null }); }
+                if (item.type === "message") { ensureF(); flushD(); activeReasoning = ""; const rawRole = item.role || "user"; const role = normalizeMessageRole(rawRole); let content; if (typeof item.content === "string") content = item.content; else if (Array.isArray(item.content)) { content = item.content.map(convertBlock).filter(Boolean); if (content.length > 0 && content.every(c => c.type === "text")) content = content.map(c => c.text).join("\n"); } if (rawRole && rawRole !== role) content = `[Previous Codex message had unsupported role "${rawRole}"; preserved as ${role}.]\n${content || ""}`; if (typeof content === "string" && role !== "user" && hasPseudoToolMarkup(content)) content = stripPseudoToolMarkup(content); messages.push({ role, content: content || null }); }
                 else if (item.type === "function_call_output") { ensureF(); activeReasoning = ""; const callId = item.call_id || item.id || ""; const tc = typeof item.output === "string" ? item.output : JSON.stringify(item.output); messages.push({ role: "tool", tool_call_id: callId, content: tc }); }
                 else if (item.type === "context_compaction") { ensureF(); flushD(); activeReasoning = ""; const text = readableCompactionText(item); if (text) messages.push({ role: "user", content: `${CODEX_CONTEXT_SUMMARY_PREFIX}\n\n${text}` }); }
                 else if (item.type === "reasoning") { activeReasoning = PROFILE?.capabilities?.reasoningReplay === false ? "" : readableReasoningText(item); }
@@ -776,10 +834,16 @@ function mapUsage(usage) {
     const input = Number(usage.prompt_tokens || 0);
     const output = Number(usage.completion_tokens || 0);
     const total = Number(usage.total_tokens || input + output);
+    const cached = Number(
+        usage.prompt_tokens_details?.cached_tokens ??
+        usage.prompt_cache_hit_tokens ??
+        usage.cache_hit_tokens ??
+        0
+    );
     return {
         input_tokens: input,
         input_tokens_details: {
-            cached_tokens: Number(usage.prompt_tokens_details?.cached_tokens || 0),
+            cached_tokens: cached,
         },
         output_tokens: output,
         output_tokens_details: {
@@ -869,21 +933,85 @@ function damagedCompactionSummary() {
     ].join("\n");
 }
 
+function clipRestoredToolOutput(item) {
+    if (!item || typeof item !== "object" || item.type !== "function_call_output") return item;
+    const output = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+    if (output.length <= MAX_RESTORED_TOOL_OUTPUT_CHARS) return item;
+    return {
+        ...item,
+        output: [
+            output.slice(0, MAX_RESTORED_TOOL_OUTPUT_CHARS),
+            `...[older tool output clipped by DeepCodex translator: ${output.length - MAX_RESTORED_TOOL_OUTPUT_CHARS} chars omitted]`,
+        ].join("\n"),
+    };
+}
+
+function pruneRestoredToolTranscripts(input) {
+    if (!Array.isArray(input) || MAX_RESTORED_TOOL_CALLS <= 0) return input;
+
+    const keepIds = new Set();
+    for (let i = input.length - 1; i >= 0 && keepIds.size < MAX_RESTORED_TOOL_CALLS; i--) {
+        const item = input[i];
+        if (!item || typeof item !== "object") continue;
+        if (item.type !== "function_call" && item.type !== "function_call_output") continue;
+        const callId = item.call_id || item.id;
+        if (callId) keepIds.add(callId);
+    }
+
+    if (keepIds.size === 0) return input;
+
+    let omitted = false;
+    const pruned = [];
+    for (const item of input) {
+        if (!item || typeof item !== "object") continue;
+        if (item.type === "function_call" || item.type === "function_call_output") {
+            const callId = item.call_id || item.id;
+            if (!callId || !keepIds.has(callId)) {
+                omitted = true;
+                continue;
+            }
+            pruned.push(clipRestoredToolOutput(item));
+            continue;
+        }
+        pruned.push(item);
+    }
+
+    if (!omitted) return pruned;
+    return [
+        {
+            type: "context_compaction",
+            summary: [
+                "DeepCodex omitted older restored tool transcripts before forwarding this turn upstream.",
+                "The latest compaction summary and recent tool results are preserved. For older exact stdout or command details, inspect the workspace or rerun the relevant command.",
+            ].join("\n"),
+        },
+        ...pruned,
+    ];
+}
+
 function repairRestoredInput(input) {
     if (!Array.isArray(input)) return input;
     let lastDamaged = -1;
+    let lastReadableCompact = -1;
     for (let i = 0; i < input.length; i++) {
         if (isDamagedCompactionItem(input[i])) lastDamaged = i;
+        else if (input[i]?.type === "context_compaction" && readableCompactionText(input[i])) lastReadableCompact = i;
     }
-    if (lastDamaged < 0) return input;
+    if (lastDamaged < 0 && input.length <= MAX_RESTORED_INPUT_ITEMS) return pruneRestoredToolTranscripts(input);
 
     const start = Math.max(lastDamaged + 1, input.length - MAX_RESTORED_INPUT_ITEMS);
     const repaired = lastDamaged >= 0
         ? [{ type: "context_compaction", summary: damagedCompactionSummary() }]
         : [];
 
-    for (const item of input.slice(start)) {
+    if (lastDamaged < 0 && lastReadableCompact >= 0 && lastReadableCompact < start) {
+        repaired.push(input[lastReadableCompact]);
+    }
+
+    for (let i = start; i < input.length; i++) {
+        const item = input[i];
         if (!item || typeof item !== "object") continue;
+        if (lastDamaged < 0 && i === lastReadableCompact && repaired.includes(item)) continue;
         if (item.type === "message") {
             if (lastDamaged >= 0 && !["user", "assistant"].includes(item.role)) continue;
             repaired.push(item);
@@ -893,7 +1021,7 @@ function repairRestoredInput(input) {
             repaired.push(item);
         }
     }
-    return repaired;
+    return pruneRestoredToolTranscripts(repaired);
 }
 
 function readableReasoningText(item) {
@@ -1580,11 +1708,13 @@ class ChatToResponsesStreamMapper {
             items.push([this.reasoning.outputIndex, { id: this.reasoning.id, type: "reasoning", status: "completed", summary: [], encrypted_content: encodeReasoningContent(this.reasoning.content) }]);
         }
         if (this.textOutputIndex !== null) {
+            const hasWebToolEvidence = requestHasToolOutputFor(this.original, ["web_search", "web_fetch"]);
             const text = shouldBlockAssistantToolClaim(this.text, {
                 hasToolEvidence: requestHasToolEvidence(this.original),
                 hasToolCall: this.toolCalls.size > 0,
+                hasWebToolEvidence,
             })
-                ? blockedToolClaimMessage()
+                ? blockedToolClaimMessageFor(this.text, { hasWebToolEvidence })
                 : sanitizeMarkdownUrlFormatting(this.text);
             items.push([this.textOutputIndex, { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] }]);
         }
@@ -1616,11 +1746,13 @@ class ChatToResponsesStreamMapper {
             }]);
         }
         if (this.textOutputIndex !== null) {
+            const hasWebToolEvidence = requestHasToolOutputFor(this.original, ["web_search", "web_fetch"]);
             const text = shouldBlockAssistantToolClaim(this.text, {
                 hasToolEvidence: requestHasToolEvidence(this.original),
                 hasToolCall: this.toolCalls.size > 0,
+                hasWebToolEvidence,
             })
-                ? blockedToolClaimMessage()
+                ? blockedToolClaimMessageFor(this.text, { hasWebToolEvidence })
                 : sanitizeMarkdownUrlFormatting(this.text);
             const item = { type: "message", id: this.messageId, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] };
             events.push(["response.output_text.done", { type: "response.output_text.done", item_id: this.messageId, output_index: this.textOutputIndex, content_index: 0, text }]);
@@ -1824,8 +1956,13 @@ const server = http.createServer(async (req, res) => {
     fail(res, 404, `Not found: ${req.method} ${url.pathname}`);
 });
 
-if (process.env.NODE_ENV !== "test") {
+function isMainModule() {
+    const entry = process.argv[1] ? resolvePath(process.argv[1]) : "";
+    return entry && entry === fileURLToPath(import.meta.url);
+}
+
+if (process.env.NODE_ENV !== "test" && isMainModule()) {
     startup().then(() => server.listen(PORT, HOST, () => console.error(`[adaptive] http://${HOST}:${PORT} → ${UPSTREAM}`)));
 }
 
-export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, MAX_TOOL_LOOPS };
+export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, usageDiagnostics, classifyUpstreamFailure, MAX_TOOL_LOOPS };

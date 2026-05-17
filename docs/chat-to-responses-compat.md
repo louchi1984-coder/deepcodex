@@ -1,21 +1,10 @@
 # Chat to Responses Compatibility Notes
 
-Scope: deepcodex should borrow community work for Chat Completions -> OpenAI Responses conversion. Claude Messages, Gemini native formats, and other non-Chat upstream protocols are out of scope for this layer.
+Scope: deepcodex translates Codex Desktop's Responses-shaped traffic to an OpenAI Chat Completions-compatible DeepSeek route. Claude Messages, Gemini native formats, and other non-Chat upstream protocols are out of scope for this layer.
 
-## Reference Implementations
+The translator must remain a compatibility layer. It should preserve Codex runtime semantics, normalize provider differences, and expose diagnostics, but it should not become a separate local control plane.
 
-- VibeAround
-  - `src/server/src/openai_proxy/chat_to_responses.rs`
-  - `src/server/src/openai_proxy/reasoning_blob.rs`
-  - `src/server/src/openai_proxy/providers/deepseek.rs`
-  - Useful because it separates generic Chat -> Responses mapping from provider-specific DeepSeek reasoning replay.
-- open-responses-server
-  - `src/open_responses_server/responses_service.py`
-  - Useful for streaming Chat chunks into Responses events and for local `previous_response_id` style history.
-- LiteLLM issue #27276
-  - Useful as a warning: unsupported/custom tool types and Codex tool names are easy to corrupt when bridging Responses and Chat.
-
-## Rules to Borrow
+## Compatibility Rules
 
 ### Response Shell
 
@@ -71,8 +60,6 @@ For streaming, emit:
 
 Chat `tool_calls[]` maps to Responses `function_call` items.
 
-Important details from VibeAround:
-
 - Allocate stable response item ids separately from Chat call ids.
 - Preserve `call_id` from Chat `tool_call.id`.
 - Stream `function.arguments` through `response.function_call_arguments.delta`.
@@ -88,18 +75,39 @@ Deepcodex-specific routing still applies after this mapping:
 
 DeepSeek `reasoning_content` is provider-native reasoning text. It should be returned as a Responses `reasoning` item.
 
-VibeAround does not try to decode OpenAI `reasoning.encrypted_content`. Instead, it creates its own opaque replay blob:
+Deepcodex must not decode or reinterpret OpenAI private reasoning blobs. If reasoning replay is needed, Deepcodex owns its own opaque replay blob:
 
 ```text
-vibearound.reasoning.hex.v1:<hex>
+deepcodex.reasoning.hex.v1:<hex>
 ```
-
-Deepcodex should follow the same principle:
 
 - Never treat OpenAI encrypted reasoning as prompt text.
 - Never try to decode OpenAI private blobs.
 - If reasoning replay is needed, create a deepcodex-owned opaque blob or local cache keyed by session/call id.
 - Map `reasoning.effort` to DeepSeek `thinking`; that is separate from encrypted reasoning replay.
+
+DeepSeek-specific handling is different from implementing a new Codex runtime:
+
+- Provider-specific handling means preserving and repairing what DeepSeek actually returns, such as `reasoning_content`, prompt-cache counters, `tool_calls` deltas, and transient 429/502/503 failures.
+- Runtime implementation means adding missing API surfaces locally, such as Files, Vector Stores, `file_search`, computer calls, MCP execution, conversation CRUD, and response stores.
+
+Deepcodex should prefer the first category inside the translator. Runtime implementation belongs to a separate project boundary, not to `translator/adaptive-server.mjs`.
+
+Provider-specific rules:
+
+- Reconstruct streamed `tool_calls` by stable `index`, not by arrival order alone.
+- Treat missing or mismatched DeepSeek `reasoning_content` as a provider-specific recoverable condition when it affects tool-call continuity.
+- Preserve `reasoning_content` across the tool-call round trip when DeepSeek requires it for a follow-up turn.
+- Map DeepSeek cache fields (`prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, provider aliases) into Responses `usage.input_tokens_details.cached_tokens`.
+- Classify upstream transient failures (`429`, `502`, `503`, connection reset) separately from protocol translation failures. Retries are only safe before any partial tool output has been emitted to Codex.
+- Detect prompt explosion / zero completion / abnormal burn rate for diagnostics, but do not let diagnostics rewrite the response contract.
+
+Translator boundaries:
+
+- Do not turn `apply_patch` into `exec_command`; it weakens Codex freeform tool semantics.
+- Do not execute MCP/computer/file-search tools inside the protocol bridge unless they are explicitly registered as deepcodex internal tools.
+- Do not implement Files or Vector Stores in the translator just to satisfy a surface area checklist.
+- Do not hide unsupported hosted OpenAI features behind fake local success.
 
 ### Finish Status
 
@@ -115,12 +123,12 @@ This needs tests because Codex uses the response status to decide whether to con
 
 Prefer real upstream streaming when no internal tool loop is active.
 
-Borrow from VibeAround:
-
 - Track text, reasoning, and tool calls independently.
 - Allocate output indices in the order items first appear.
 - Handle tool call deltas before arguments are complete.
 - Emit final `response.completed` with the same output items that were streamed.
+- Keep DeepSeek `reasoning_content` deltas independent from assistant text deltas.
+- When upstream sends partial tool-call chunks, merge by `tool_call.index` and only emit a completed Responses tool item when name and arguments are complete enough for Codex.
 
 The current deepcodex synthetic SSE is acceptable only as a fallback.
 
@@ -137,7 +145,7 @@ These can exist in other projects, but they should not drive deepcodex's Chat ->
 ## Current Deepcodex Gaps
 
 - `chatToResponsesFormat` returns a minimal response object; it should preserve more shell fields from the original request.
-- Streaming only handles text in the native path; it needs reasoning and tool call delta support.
-- DeepSeek `reasoning_content` is returned as `summary_text`, but not as an opaque replayable reasoning item.
+- Native streaming needs continued hardening around reasoning and tool-call delta reconstruction.
+- DeepSeek `reasoning_content` is returned as a Responses reasoning item, but multi-turn replay should remain deepcodex-owned and must not pretend to decode OpenAI encrypted reasoning.
 - `context_compaction` as a later input item needs explicit handling in Responses -> Chat; this is adjacent to, but not part of, Chat -> Responses.
 - Unknown tool calls should stay unresolved and pass back to Codex, not be executed by the bridge.
