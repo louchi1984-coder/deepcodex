@@ -14,6 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 import ddg_urllib_search
 
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 BLOCKED_DOMAINS = ("reuters.com", "wsj.com", "nytimes.com", "zhihu.com")
 
