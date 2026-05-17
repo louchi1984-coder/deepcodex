@@ -39,8 +39,8 @@ Latest release:
 
 | Platform | Status | Download |
 | --- | --- | --- |
-| macOS | Available | `deepcodex-macos-2026.05.16.dmg` |
-| Windows | beta / preview | `deepcodex-windows-v0.1.5-preview.zip` |
+| macOS | Available | `deepcodex-macos-2026.05.17.dmg` |
+| Windows | beta / preview | `deepcodex-windows-v0.1.6-preview.zip` |
 
 Users on older builds are encouraged to update. Recent builds include fixes for context compaction, DSML pseudo tool calls, `web_search` / `web_fetch` tool result handling, fake tool narration guards, and several DeepSeek compatibility issues.
 
@@ -54,14 +54,14 @@ deepcodex does not bundle official Codex Desktop and does not modify the officia
 
 ### macOS
 
-1. Download `deepcodex-macos-2026.05.16.dmg`
+1. Download `deepcodex-macos-2026.05.17.dmg`
 2. Open the DMG and drag `DeepCodex.app` into `Applications`
 3. Open `DeepCodex`
 4. Enter your DeepSeek API key; once the connection test passes, it is saved automatically
 
 ### Windows beta
 
-1. Download `deepcodex-windows-v0.1.5-preview.zip`
+1. Download `deepcodex-windows-v0.1.6-preview.zip`
 2. Unzip it
 3. Double-click `install-windows.bat`
 4. Launch `DeepCodex` from the desktop shortcut or Start Menu
