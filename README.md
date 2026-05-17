@@ -39,7 +39,7 @@
 | macOS | 可用 | `deepcodex-macos-2026.05.17.dmg` |
 | Windows | beta / preview | `deepcodex-windows-v0.1.8-preview.zip` |
 
-> 已安装旧版的用户建议直接更新。新版重点修复了上下文恢复导致的缓存命中异常、上下文压缩、DSML 伪工具调用、`web_search` / `web_fetch` 回灌、假工具叙述拦截误判，以及多处 DeepSeek 兼容层问题。
+> 已安装旧版的用户建议直接更新。新版重点修复了上下文恢复导致的缓存命中异常、上下文压缩、DSML 伪工具调用、`web_search` / `web_fetch` 回灌、假工具叙述拦截误判、macOS 退出后 translator 进程残留，以及多处 DeepSeek 兼容层问题。
 
 ---
 
@@ -267,6 +267,20 @@ open -n -a "Codex"
 原因是 macOS 可能会把正在运行的 Codex 核心进程视为“Codex 已打开”，普通双击原版 Codex 时只聚焦已有实例，而不是再开一个原版实例。
 
 不要手动修改 `/Applications/Codex.app`。deepcodex 是补丁入口，不会改写官方 Codex app。
+
+### 退出与进程清理
+
+deepcodex 在本机运行一个本地 translator 服务，默认地址是 `http://127.0.0.1:8282`。这个服务负责把 Codex Desktop 的 Responses 请求翻译成 DeepSeek 可用的 Chat 请求。
+
+正常退出 `deepcodex` 后，macOS 版会在约 **10 秒内**自动清理本地 translator 进程，避免旧进程继续响应请求或继续消耗 DeepSeek token。
+
+如果你发现退出 app 后仍然出现异常消耗、旧逻辑继续生效，或者 `8282` 端口仍在响应，可以手动检查：
+
+```bash
+ps aux | grep 'adaptive-server.mjs'
+```
+
+正常情况下，`deepcodex` 关闭后不应长期保留 `adaptive-server.mjs` 进程。旧版本曾存在退出后 translator 进程残留的问题；如果遇到这种情况，请优先更新到最新 DMG。
 
 ---
 
