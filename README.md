@@ -272,7 +272,7 @@ open -n -a "Codex"
 
 deepcodex 在本机运行一个本地 translator 服务，默认地址是 `http://127.0.0.1:8282`。这个服务负责把 Codex Desktop 的 Responses 请求翻译成 DeepSeek 可用的 Chat 请求。
 
-正常退出 `deepcodex` 后，macOS 版会在约 **10 秒内**自动清理本地 translator 进程，避免旧进程继续响应请求或继续消耗 DeepSeek token。
+macOS 版 watcher 启动后会给 DeepCodex UI 约 **10 秒**的出现时间，避免启动瞬间误判。UI 一旦出现过，后续退出 `deepcodex` 时，本地 translator 会在下一次轮询中立即清理，通常约 1 秒内完成，避免旧进程继续响应请求或继续消耗 DeepSeek token。
 
 如果你发现退出 app 后仍然出现异常消耗、旧逻辑继续生效，或者 `8282` 端口仍在响应，可以手动检查：
 

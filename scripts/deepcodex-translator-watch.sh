@@ -73,17 +73,27 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 start_time="$(date +%s)"
+seen_ui=0
 
 while true; do
-  now="$(date +%s)"
-  if ! ui_alive && [ $((now - start_time)) -gt "$DEEPCODEX_WATCH_GRACE_SECONDS" ]; then
-    log "deepcodex UI is not running; stopping translator watcher"
-    exit 0
+  if ui_alive; then
+    seen_ui=1
+  else
+    if [ "$seen_ui" = "1" ]; then
+      log "deepcodex UI exited; stopping translator watcher"
+      exit 0
+    fi
+
+    now="$(date +%s)"
+    if [ $((now - start_time)) -gt "$DEEPCODEX_WATCH_GRACE_SECONDS" ]; then
+      log "deepcodex UI did not appear during startup grace; stopping translator watcher"
+      exit 0
+    fi
   fi
 
   if ! translator_alive; then
     start_translator || true
   fi
 
-  sleep 5
+  sleep 1
 done
