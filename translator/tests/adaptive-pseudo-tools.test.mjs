@@ -889,6 +889,33 @@ test("restored history prunes older tool transcripts while keeping recent tool p
   assert.equal(body.messages.at(-1).role, "user");
 });
 
+test("restored history keeps active-turn tool transcripts stable for prompt cache", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续当前任务。" },
+    ...Array.from({ length: 20 }, (_, index) => ([
+      { type: "function_call", call_id: `old_${index}`, name: "exec_command", arguments: `{"cmd":"echo old-${index}"}` },
+      { type: "function_call_output", call_id: `old_${index}`, output: `old-output-${index}` },
+    ])).flat(),
+    { type: "message", role: "user", content: [{ type: "text", text: "继续修复缓存命中" }] },
+    ...Array.from({ length: 20 }, (_, index) => ([
+      { type: "function_call", call_id: `active_${index}`, name: "exec_command", arguments: `{"cmd":"echo active-${index}"}` },
+      { type: "function_call_output", call_id: `active_${index}`, output: `active-output-${index}` },
+    ])).flat(),
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(body.messages[0].content, /omitted older restored tool transcripts/);
+  assert.doesNotMatch(joined, /old-output-0/);
+  assert.match(joined, /old-output-19/);
+  assert.match(joined, /active-output-0/);
+  assert.match(joined, /active-output-19/);
+});
+
 test("restored history drops volatile polling transcripts that change every turn", () => {
   const input = [
     { type: "context_compaction", summary: "压缩摘要：继续当前发布任务。" },

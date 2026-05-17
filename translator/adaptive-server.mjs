@@ -1063,13 +1063,34 @@ function dropVolatileRestoredItems(input) {
 function pruneRestoredToolTranscripts(input) {
     if (!Array.isArray(input) || MAX_RESTORED_TOOL_CALLS <= 0) return input;
 
+    let activeTurnStart = -1;
+    for (let i = input.length - 1; i >= 0; i--) {
+        const item = input[i];
+        if (item?.type === "message" && item.role === "user") {
+            activeTurnStart = i;
+            break;
+        }
+    }
+
     const keepIds = new Set();
-    for (let i = input.length - 1; i >= 0 && keepIds.size < MAX_RESTORED_TOOL_CALLS; i--) {
+    for (let i = activeTurnStart + 1; i < input.length; i++) {
         const item = input[i];
         if (!item || typeof item !== "object") continue;
         if (item.type !== "function_call" && item.type !== "function_call_output") continue;
         const callId = item.call_id || item.id;
         if (callId) keepIds.add(callId);
+    }
+
+    let olderKept = 0;
+    for (let i = activeTurnStart >= 0 ? activeTurnStart - 1 : input.length - 1; i >= 0 && olderKept < MAX_RESTORED_TOOL_CALLS; i--) {
+        const item = input[i];
+        if (!item || typeof item !== "object") continue;
+        if (item.type !== "function_call" && item.type !== "function_call_output") continue;
+        const callId = item.call_id || item.id;
+        if (callId && !keepIds.has(callId)) {
+            keepIds.add(callId);
+            olderKept += 1;
+        }
     }
 
     if (keepIds.size === 0) return input;
