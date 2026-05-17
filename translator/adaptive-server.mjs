@@ -935,8 +935,11 @@ function damagedCompactionSummary() {
 
 function clipRestoredToolOutput(item) {
     if (!item || typeof item !== "object" || item.type !== "function_call_output") return item;
-    const output = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
-    if (output.length <= MAX_RESTORED_TOOL_OUTPUT_CHARS) return item;
+    const originalOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+    const output = stripVolatileToolOutput(originalOutput);
+    if (output.length <= MAX_RESTORED_TOOL_OUTPUT_CHARS) {
+        return output === originalOutput ? item : { ...item, output };
+    }
     return {
         ...item,
         output: [
@@ -944,6 +947,117 @@ function clipRestoredToolOutput(item) {
             `...[older tool output clipped by DeepCodex translator: ${output.length - MAX_RESTORED_TOOL_OUTPUT_CHARS} chars omitted]`,
         ].join("\n"),
     };
+}
+
+function textFromMessageContent(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+        return content.map(part => typeof part === "string" ? part : part?.text || "").filter(Boolean).join("\n");
+    }
+    return "";
+}
+
+function stripVolatileToolOutput(output) {
+    return String(output || "")
+        .split(/\r?\n/)
+        .filter(line => ![
+            /^Chunk ID:\s*/i,
+            /^Wall time:\s*/i,
+            /^Process exited with code\s+/i,
+            /^Process running with session ID\s+/i,
+            /^Original token count:\s*/i,
+            /^Output:\s*$/i,
+            /^\*\* WARNING: connection is not using a post-quantum key exchange algorithm\./,
+            /^\*\* This session may be vulnerable to "store now, decrypt later" attacks\./,
+            /^\*\* The server may need to be upgraded\. See https:\/\/openssh\.com\/pq\.html/,
+        ].some(re => re.test(line)))
+        .join("\n")
+        .trim();
+}
+
+function restoredToolCallText(item) {
+    if (!item || typeof item !== "object") return "";
+    return `${item.name || ""}\n${typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || "")}`;
+}
+
+function isVolatileRestoredToolCall(item) {
+    if (!item || typeof item !== "object" || item.type !== "function_call") return false;
+    const text = restoredToolCallText(item);
+    if (item.name === "write_stdin" && /\bsession_id\b|\byield_time_ms\b/.test(text)) return true;
+    return [
+        /\bStart-Sleep\b/i,
+        /\bGet-Process\b/i,
+        /\bGet-WmiObject\b/i,
+        /\bProcessId=\d+/i,
+        /\/api\/ps\b/i,
+        /\bbench_result\.txt\b/i,
+        /\bProcess running with session ID\b/i,
+        /\bsession_id\b/i,
+    ].some(re => re.test(text));
+}
+
+function isVolatileRestoredToolOutput(item) {
+    if (!item || typeof item !== "object" || item.type !== "function_call_output") return false;
+    const output = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+    return [
+        /Process running with session ID/i,
+        /stdin is closed for this session/i,
+        /Reconnecting\.\.\.\s*\d\/\d/i,
+    ].some(re => re.test(output));
+}
+
+function isVolatileRestoredMessage(item) {
+    if (!item || typeof item !== "object" || item.type !== "message") return false;
+    const text = textFromMessageContent(item.content);
+    return [
+        /^<turn_aborted>/,
+        /Reconnecting\.\.\.\s*\d\/\d/i,
+        /stream disconnected before completion/i,
+        /可能还在跑。*等/i,
+        /等会话完成/i,
+        /又超时了/i,
+        /while \(Get-Process/i,
+    ].some(re => re.test(text.trim()));
+}
+
+function dropVolatileRestoredItems(input) {
+    if (!Array.isArray(input)) return input;
+    const volatileIds = new Set();
+    for (const item of input) {
+        if (!item || typeof item !== "object") continue;
+        if (isVolatileRestoredToolCall(item) || isVolatileRestoredToolOutput(item)) {
+            const callId = item.call_id || item.id;
+            if (callId) volatileIds.add(callId);
+        }
+    }
+
+    let omitted = false;
+    const filtered = [];
+    for (const item of input) {
+        if (!item || typeof item !== "object") continue;
+        const callId = item.call_id || item.id;
+        if ((item.type === "function_call" || item.type === "function_call_output") && callId && volatileIds.has(callId)) {
+            omitted = true;
+            continue;
+        }
+        if (isVolatileRestoredMessage(item)) {
+            omitted = true;
+            continue;
+        }
+        filtered.push(item);
+    }
+
+    if (!omitted) return input;
+    return [
+        {
+            type: "context_compaction",
+            summary: [
+                "DeepCodex omitted volatile restored polling/status transcripts before forwarding this turn upstream.",
+                "Dropped items include interrupted-turn markers, reconnect messages, running-session polls, process-status checks, and transport wrapper lines that change every turn and harm prompt-cache stability.",
+            ].join("\n"),
+        },
+        ...filtered,
+    ];
 }
 
 function pruneRestoredToolTranscripts(input) {
@@ -991,6 +1105,7 @@ function pruneRestoredToolTranscripts(input) {
 
 function repairRestoredInput(input) {
     if (!Array.isArray(input)) return input;
+    input = dropVolatileRestoredItems(input);
     let lastDamaged = -1;
     let lastReadableCompact = -1;
     for (let i = 0; i < input.length; i++) {

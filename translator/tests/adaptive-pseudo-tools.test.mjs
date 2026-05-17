@@ -889,6 +889,33 @@ test("restored history prunes older tool transcripts while keeping recent tool p
   assert.equal(body.messages.at(-1).role, "user");
 });
 
+test("restored history drops volatile polling transcripts that change every turn", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续当前发布任务。" },
+    { type: "message", role: "assistant", content: [{ type: "text", text: "可能还在跑。等等再查。" }] },
+    { type: "function_call", call_id: "call_poll", name: "exec_command", arguments: JSON.stringify({ cmd: "ssh win-codex \"powershell -NoProfile -Command \\\"Get-Process python\\\"\"" }) },
+    { type: "function_call_output", call_id: "call_poll", output: "Chunk ID: abc\nWall time: 10.0009 seconds\nProcess running with session ID 96679\nOriginal token count: 56\nOutput:\n" },
+    { type: "function_call", call_id: "call_result", name: "exec_command", arguments: JSON.stringify({ cmd: "cat release-notes.txt" }) },
+    { type: "function_call_output", call_id: "call_result", output: "Chunk ID: stable\nWall time: 0.1 seconds\nProcess exited with code 0\nOriginal token count: 20\nOutput:\nrelease notes are ready" },
+    { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+  const joined = JSON.stringify(body.messages);
+
+  assert.match(joined, /omitted volatile restored polling/);
+  assert.doesNotMatch(joined, /Get-Process/);
+  assert.doesNotMatch(joined, /session ID 96679/);
+  assert.doesNotMatch(joined, /等等再查/);
+  assert.doesNotMatch(joined, /Chunk ID/);
+  assert.doesNotMatch(joined, /Wall time/);
+  assert.match(joined, /release notes are ready/);
+  assert.equal(body.messages.at(-1).role, "user");
+});
+
 test("deepcodex reasoning blob is replayed onto following Chat tool calls", () => {
   const reasoningText = "Need to inspect cwd before answering.";
   const blob = `deepcodex.reasoning.hex.v1:${Buffer.from(reasoningText, "utf8").toString("hex")}`;
