@@ -840,8 +840,8 @@ test("healthy long restored history is capped by translator item count", () => {
     input,
   }, { allowTools: false, injectInternalTools: false });
 
-  assert.equal(body.messages.length, 120);
-  assert.match(body.messages[0].content, /healthy-history-110/);
+  assert.equal(body.messages.length, 220);
+  assert.match(body.messages[0].content, /healthy-history-10/);
   assert.match(body.messages.at(-1).content, /healthy-history-229/);
 });
 
@@ -863,7 +863,7 @@ test("healthy long restored history keeps the latest compaction summary before c
 
   assert.match(body.messages[0].content, /压缩摘要/);
   assert.match(body.messages[0].content, /缓存命中/);
-  assert.match(body.messages[1].content, /tail-history-110/);
+  assert.match(body.messages[1].content, /tail-history-10/);
   assert.match(body.messages.at(-1).content, /tail-history-229/);
 });
 
