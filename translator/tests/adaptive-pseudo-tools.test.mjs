@@ -723,6 +723,23 @@ test("damaged context_compaction repairs restore and drops noisy tool history", 
   assert.match(body.messages.at(-1).content, /继续修复 compact restore/);
 });
 
+test("healthy long restored history is not truncated by translator item count", () => {
+  const input = Array.from({ length: 230 }, (_, index) => ({
+    type: "message",
+    role: index % 2 ? "assistant" : "user",
+    content: [{ type: "text", text: `healthy-history-${index}` }],
+  }));
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.equal(body.messages.length, 230);
+  assert.match(body.messages[0].content, /healthy-history-0/);
+  assert.match(body.messages.at(-1).content, /healthy-history-229/);
+});
+
 test("deepcodex reasoning blob is replayed onto following Chat tool calls", () => {
   const reasoningText = "Need to inspect cwd before answering.";
   const blob = `deepcodex.reasoning.hex.v1:${Buffer.from(reasoningText, "utf8").toString("hex")}`;

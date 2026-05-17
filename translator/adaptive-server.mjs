@@ -875,7 +875,7 @@ function repairRestoredInput(input) {
     for (let i = 0; i < input.length; i++) {
         if (isDamagedCompactionItem(input[i])) lastDamaged = i;
     }
-    if (lastDamaged < 0 && input.length <= MAX_RESTORED_INPUT_ITEMS) return input;
+    if (lastDamaged < 0) return input;
 
     const start = Math.max(lastDamaged + 1, input.length - MAX_RESTORED_INPUT_ITEMS);
     const repaired = lastDamaged >= 0
