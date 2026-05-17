@@ -248,6 +248,9 @@ export function buildChatToolsWithRouting(parsed, options = {}) {
 
   for (const raw of parsed.tools) {
     const cl = classifyTool(raw);
+    if (isTranslatorHiddenTool(cl.name)) {
+      continue;
+    }
 
     if (cl.type === "hosted") {
       // Drop hosted/account-bound tools when upstream lacks them
@@ -353,4 +356,8 @@ export function buildChatToolsWithRouting(parsed, options = {}) {
   }
 
   return { tools: chatTools, routing };
+}
+
+function isTranslatorHiddenTool(name) {
+  return name === "update_plan";
 }

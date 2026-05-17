@@ -487,7 +487,7 @@ compatTest("buildChatToolsWithRouting produces Chat-format tools from fixture", 
 
   // Function tools forward normally
   assert.ok(toolNames.includes("exec_command"), "exec_command forwarded");
-  assert.ok(toolNames.includes("update_plan"), "update_plan forwarded");
+  assert.ok(!toolNames.includes("update_plan"), "update_plan hidden because it is volatile UI state");
 
   // Namespace mcp__node_repl__ flattened → collision-safe names
   assert.ok(toolNames.includes("mcp__node_repl__js"), "mcp__node_repl__js forwarded");
@@ -610,6 +610,22 @@ compatTest("buildChatToolsWithRouting no request tools + no internal tools yield
 
   assert.equal(tools.length, 0, "empty tools");
   assert.equal(Object.keys(routing).length, 0, "empty routing");
+});
+
+compatTest("buildChatToolsWithRouting hides update_plan from upstream tools", () => {
+  const { tools, routing } = buildChatToolsWithRouting({
+    model: "gpt-5.5",
+    tool_choice: "auto",
+    tools: [
+      { type: "function", function: { name: "update_plan", parameters: { type: "object", properties: {} } } },
+      { type: "function", function: { name: "exec_command", parameters: { type: "object", properties: {} } } },
+    ],
+    input: "hello",
+  }, { injectInternalTools: false });
+
+  assert.equal(tools.some(t => t.function?.name === "update_plan"), false);
+  assert.equal(tools.some(t => t.function?.name === "exec_command"), true);
+  assert.equal(routing.update_plan, undefined);
 });
 
 // ── Reverse-mapping simulation (chatToResponsesFormat behavior) ──

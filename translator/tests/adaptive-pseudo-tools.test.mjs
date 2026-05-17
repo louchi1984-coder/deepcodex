@@ -916,6 +916,31 @@ test("restored history keeps active-turn tool transcripts stable for prompt cach
   assert.match(joined, /active-output-19/);
 });
 
+test("restored history prunes active-turn tool transcripts already summarized by assistant", () => {
+  const input = [
+    { type: "message", role: "user", content: [{ type: "text", text: "继续修复" }] },
+    ...Array.from({ length: 20 }, (_, index) => ([
+      { type: "function_call", call_id: `summarized_${index}`, name: "exec_command", arguments: `{"cmd":"echo summarized-${index}"}` },
+      { type: "function_call_output", call_id: `summarized_${index}`, output: `summarized-output-${index}` },
+    ])).flat(),
+    { type: "message", role: "assistant", content: [{ type: "text", text: "前面失败原因已经确认，继续下一步。" }] },
+    { type: "function_call", call_id: "current_0", name: "exec_command", arguments: "{\"cmd\":\"pwd\"}" },
+    { type: "function_call_output", call_id: "current_0", output: "/tmp/project" },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(body.messages[0].content, /omitted older restored tool transcripts/);
+  assert.doesNotMatch(joined, /summarized-output-0/);
+  assert.doesNotMatch(joined, /summarized-output-19/);
+  assert.match(joined, /前面失败原因已经确认/);
+  assert.ok(joined.includes("/tmp/project"));
+});
+
 test("restored history drops volatile polling transcripts that change every turn", () => {
   const input = [
     { type: "context_compaction", summary: "压缩摘要：继续当前发布任务。" },
@@ -941,6 +966,87 @@ test("restored history drops volatile polling transcripts that change every turn
   assert.doesNotMatch(joined, /Wall time/);
   assert.match(joined, /release notes are ready/);
   assert.equal(body.messages.at(-1).role, "user");
+});
+
+test("restored history drops update_plan transcripts that churn prompt cache", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "message", role: "assistant", content: [{ type: "text", text: "更新计划后继续。" }] },
+      { type: "function_call", call_id: "call_plan", name: "update_plan", arguments: JSON.stringify({ plan: [{ status: "in_progress", step: "A" }] }) },
+      { type: "function_call_output", call_id: "call_plan", output: "Plan updated" },
+      { type: "function_call", call_id: "call_exec", name: "exec_command", arguments: JSON.stringify({ cmd: "pwd" }) },
+      { type: "function_call_output", call_id: "call_exec", output: "/tmp/project" },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /omitted volatile restored polling/);
+  assert.doesNotMatch(joined, /update_plan/);
+  assert.doesNotMatch(joined, /Plan updated/);
+  assert.match(joined, /exec_command/);
+  assert.ok(joined.includes("/tmp/project"));
+});
+
+test("restored custom tool calls replay as Chat tool calls", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "custom_tool_call", call_id: "call_patch", name: "apply_patch", input: "*** Begin Patch\n*** End Patch" },
+      { type: "custom_tool_call_output", call_id: "call_patch", output: "patch failed" },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.equal(body.messages[0].role, "assistant");
+  assert.equal(body.messages[0].tool_calls[0].id, "call_patch");
+  assert.equal(body.messages[0].tool_calls[0].function.name, "apply_patch");
+  assert.deepEqual(JSON.parse(body.messages[0].tool_calls[0].function.arguments), {
+    content: "*** Begin Patch\n*** End Patch",
+  });
+  assert.equal(body.messages[1].role, "tool");
+  assert.equal(body.messages[1].tool_call_id, "call_patch");
+  assert.equal(body.messages[1].content, "patch failed");
+  assert.equal(body.messages[2].role, "user");
+});
+
+test("restored custom tool bodies are clipped to avoid prompt-cache churn", () => {
+  const largePatch = `*** Begin Patch\n${"x".repeat(5000)}\n*** End Patch`;
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "custom_tool_call", call_id: "call_patch", name: "apply_patch", input: largePatch },
+      { type: "custom_tool_call_output", call_id: "call_patch", output: "apply_patch verification failed: expected lines not found" },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  const args = JSON.parse(body.messages[0].tool_calls[0].function.arguments);
+  assert.ok(args.content.length < largePatch.length);
+  assert.match(args.content, /older custom tool body clipped/);
+  assert.equal(body.messages[1].content, "apply_patch verification failed: expected lines not found");
+});
+
+test("restored long source outputs are folded but important errors are preserved", () => {
+  const longSource = Array.from({ length: 160 }, (_, i) => `${i + 1}\tconst value${i} = computeThing(${i});`).join("\n");
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_source", name: "exec_command", arguments: JSON.stringify({ cmd: "sed -n '1,160p' src/file.js" }) },
+      { type: "function_call_output", call_id: "call_source", output: longSource },
+      { type: "function_call", call_id: "call_error", name: "exec_command", arguments: JSON.stringify({ cmd: "npm run check" }) },
+      { type: "function_call_output", call_id: "call_error", output: "SyntaxError: Unexpected token at src/file.js:42\n    at compile" },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /DeepCodex folded/);
+  assert.match(joined, /const value0/);
+  assert.match(joined, /const value159/);
+  assert.doesNotMatch(joined, /const value80/);
+  assert.match(joined, /SyntaxError: Unexpected token/);
 });
 
 test("deepcodex reasoning blob is replayed onto following Chat tool calls", () => {

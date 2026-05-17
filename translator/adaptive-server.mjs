@@ -41,6 +41,8 @@ const MAX_FAKE_TOOL_CLAIM_REPLAYS = Number(process.env.TRANSLATOR_MAX_FAKE_TOOL_
 const MAX_RESTORED_INPUT_ITEMS = Number(process.env.TRANSLATOR_MAX_RESTORED_INPUT_ITEMS || 220);
 const MAX_RESTORED_TOOL_CALLS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_CALLS || 12);
 const MAX_RESTORED_TOOL_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_OUTPUT_CHARS || 4000);
+const MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS || 1200);
+const MAX_RESTORED_SOURCE_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_SOURCE_OUTPUT_CHARS || 1200);
 const DEBUG_UPSTREAM = process.env.DEEPCODEX_DEBUG_UPSTREAM === "1" || process.env.TRANSLATOR_DEBUG_UPSTREAM === "1";
 const RESPONSES_PATHS = new Set(["/responses", "/v1/responses", "/responses/compact", "/v1/responses/compact"]);
 const REASONING_BLOB_PREFIX = "deepcodex.reasoning.hex.v1:";
@@ -660,7 +662,7 @@ function responsesToChatBody(parsed, options = {}) {
         const ensureF = () => { if (pendingTC) { messages.push(pendingTC); pendingIds = new Set((pendingTC.tool_calls || []).map(tc => tc.id).filter(Boolean)); pendingTC = null; } };
 
         for (const item of inputItems) {
-            if (item.type === "function_call") {
+            if (item.type === "function_call" || item.type === "custom_tool_call") {
                 if (pendingIds?.size > 0) { flushD(); pendingIds = null; }
                 if (!pendingTC) {
                     const last = messages[messages.length - 1];
@@ -668,10 +670,13 @@ function responsesToChatBody(parsed, options = {}) {
                     else { pendingTC = { role: "assistant", content: null, tool_calls: [] }; }
                 }
                 if (activeReasoning && !pendingTC.reasoning_content) pendingTC.reasoning_content = activeReasoning;
-                pendingTC.tool_calls.push({ id: item.call_id || item.id || `call_${Date.now()}`, type: "function", function: { name: item.name, arguments: item.arguments || "{}" } });
+                const argumentsText = item.type === "custom_tool_call"
+                    ? JSON.stringify({ content: typeof item.input === "string" ? item.input : JSON.stringify(item.input ?? "") })
+                    : item.arguments || "{}";
+                pendingTC.tool_calls.push({ id: item.call_id || item.id || `call_${Date.now()}`, type: "function", function: { name: item.name, arguments: argumentsText } });
             } else {
                 if (item.type === "message") { ensureF(); flushD(); activeReasoning = ""; const rawRole = item.role || "user"; const role = normalizeMessageRole(rawRole); let content; if (typeof item.content === "string") content = item.content; else if (Array.isArray(item.content)) { content = item.content.map(convertBlock).filter(Boolean); if (content.length > 0 && content.every(c => c.type === "text")) content = content.map(c => c.text).join("\n"); } if (rawRole && rawRole !== role) content = `[Previous Codex message had unsupported role "${rawRole}"; preserved as ${role}.]\n${content || ""}`; if (typeof content === "string" && role !== "user" && hasPseudoToolMarkup(content)) content = stripPseudoToolMarkup(content); messages.push({ role, content: content || null }); }
-                else if (item.type === "function_call_output") { ensureF(); activeReasoning = ""; const callId = item.call_id || item.id || ""; const tc = typeof item.output === "string" ? item.output : JSON.stringify(item.output); messages.push({ role: "tool", tool_call_id: callId, content: tc }); }
+                else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") { ensureF(); activeReasoning = ""; const callId = item.call_id || item.id || ""; const tc = typeof item.output === "string" ? item.output : JSON.stringify(item.output); messages.push({ role: "tool", tool_call_id: callId, content: tc }); }
                 else if (item.type === "context_compaction") { ensureF(); flushD(); activeReasoning = ""; const text = readableCompactionText(item); if (text) messages.push({ role: "user", content: `${CODEX_CONTEXT_SUMMARY_PREFIX}\n\n${text}` }); }
                 else if (item.type === "reasoning") { activeReasoning = PROFILE?.capabilities?.reasoningReplay === false ? "" : readableReasoningText(item); }
                 else {
@@ -758,9 +763,9 @@ function compactFallbackTextFromRequest(original) {
         if (!item || typeof item !== "object") continue;
         if (item.type === "message") {
             pushText(`${item.role || "message"} message`, textFromContent(item.content));
-        } else if (item.type === "function_call") {
-            pushText("tool call", `${item.name || "unknown"} ${item.arguments || ""}`);
-        } else if (item.type === "function_call_output") {
+        } else if (item.type === "function_call" || item.type === "custom_tool_call") {
+            pushText("tool call", `${item.name || "unknown"} ${item.arguments || item.input || ""}`);
+        } else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
             pushText(`tool result ${item.call_id || ""}`.trim(), typeof item.output === "string" ? item.output : JSON.stringify(item.output || ""));
         } else if (item.type === "context_compaction") {
             pushText("previous context summary", readableCompactionText(item));
@@ -934,9 +939,9 @@ function damagedCompactionSummary() {
 }
 
 function clipRestoredToolOutput(item) {
-    if (!item || typeof item !== "object" || item.type !== "function_call_output") return item;
+    if (!item || typeof item !== "object" || (item.type !== "function_call_output" && item.type !== "custom_tool_call_output")) return item;
     const originalOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
-    const output = stripVolatileToolOutput(originalOutput);
+    const output = normalizeRestoredToolOutput(stripVolatileToolOutput(originalOutput));
     if (output.length <= MAX_RESTORED_TOOL_OUTPUT_CHARS) {
         return output === originalOutput ? item : { ...item, output };
     }
@@ -945,6 +950,52 @@ function clipRestoredToolOutput(item) {
         output: [
             output.slice(0, MAX_RESTORED_TOOL_OUTPUT_CHARS),
             `...[older tool output clipped by DeepCodex translator: ${output.length - MAX_RESTORED_TOOL_OUTPUT_CHARS} chars omitted]`,
+        ].join("\n"),
+    };
+}
+
+function normalizeRestoredToolOutput(output) {
+    const text = String(output || "").trim();
+    if (!text) {
+        return "[DeepCodex tool result: command completed with no stdout after removing transport noise.]";
+    }
+    if (isImportantToolError(text)) return text;
+    if (!looksLikeSourceDump(text) || text.length <= MAX_RESTORED_SOURCE_OUTPUT_CHARS) return text;
+    const headChars = Math.floor(MAX_RESTORED_SOURCE_OUTPUT_CHARS * 0.62);
+    const tailChars = MAX_RESTORED_SOURCE_OUTPUT_CHARS - headChars;
+    return [
+        text.slice(0, headChars).trimEnd(),
+        `\n...[DeepCodex folded ${text.length - headChars - tailChars} chars from a long source/code listing to keep prompt cache stable. Re-read the exact file/range if more context is needed.]...\n`,
+        text.slice(-tailChars).trimStart(),
+    ].join("");
+}
+
+function isImportantToolError(text) {
+    return [
+        /\b(error|exception|traceback|failed|failure|cannot|can't|syntaxerror|typeerror|referenceerror)\b/i,
+        /\b(exit code|code \d+|ERR_|ENOENT|EACCES|EPERM|ECONNREFUSED|timeout)\b/i,
+        /apply_patch verification failed/i,
+        /\bTS\d{4}\b/,
+    ].some(re => re.test(text));
+}
+
+function looksLikeSourceDump(text) {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length < 25) return false;
+    const numbered = lines.filter(line => /^\s*\d+[:\t ]/.test(line)).length;
+    const codeish = lines.filter(line => /[{}();=<>]|\b(function|const|let|var|import|export|class|return|case|if|else)\b/.test(line)).length;
+    return numbered >= 8 || codeish / lines.length > 0.35;
+}
+
+function clipRestoredToolCall(item) {
+    if (!item || typeof item !== "object" || item.type !== "custom_tool_call") return item;
+    const originalInput = typeof item.input === "string" ? item.input : JSON.stringify(item.input ?? "");
+    if (originalInput.length <= MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS) return item;
+    return {
+        ...item,
+        input: [
+            originalInput.slice(0, MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS),
+            `...[older custom tool body clipped by DeepCodex translator: ${originalInput.length - MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS} chars omitted; use paired tool result and current files as source of truth]`,
         ].join("\n"),
     };
 }
@@ -977,11 +1028,15 @@ function stripVolatileToolOutput(output) {
 
 function restoredToolCallText(item) {
     if (!item || typeof item !== "object") return "";
-    return `${item.name || ""}\n${typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || "")}`;
+    const args = item.type === "custom_tool_call"
+        ? item.input
+        : item.arguments;
+    return `${item.name || ""}\n${typeof args === "string" ? args : JSON.stringify(args || "")}`;
 }
 
 function isVolatileRestoredToolCall(item) {
-    if (!item || typeof item !== "object" || item.type !== "function_call") return false;
+    if (!item || typeof item !== "object" || (item.type !== "function_call" && item.type !== "custom_tool_call")) return false;
+    if (item.name === "update_plan") return true;
     const text = restoredToolCallText(item);
     if (item.name === "write_stdin" && /\bsession_id\b|\byield_time_ms\b/.test(text)) return true;
     return [
@@ -997,7 +1052,7 @@ function isVolatileRestoredToolCall(item) {
 }
 
 function isVolatileRestoredToolOutput(item) {
-    if (!item || typeof item !== "object" || item.type !== "function_call_output") return false;
+    if (!item || typeof item !== "object" || (item.type !== "function_call_output" && item.type !== "custom_tool_call_output")) return false;
     const output = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
     return [
         /Process running with session ID/i,
@@ -1036,7 +1091,7 @@ function dropVolatileRestoredItems(input) {
     for (const item of input) {
         if (!item || typeof item !== "object") continue;
         const callId = item.call_id || item.id;
-        if ((item.type === "function_call" || item.type === "function_call_output") && callId && volatileIds.has(callId)) {
+        if ((item.type === "function_call" || item.type === "function_call_output" || item.type === "custom_tool_call" || item.type === "custom_tool_call_output") && callId && volatileIds.has(callId)) {
             omitted = true;
             continue;
         }
@@ -1071,21 +1126,29 @@ function pruneRestoredToolTranscripts(input) {
             break;
         }
     }
+    let activeToolStart = activeTurnStart + 1;
+    for (let i = input.length - 1; i > activeTurnStart; i--) {
+        const item = input[i];
+        if (item?.type === "message" && item.role === "assistant") {
+            activeToolStart = i + 1;
+            break;
+        }
+    }
 
     const keepIds = new Set();
-    for (let i = activeTurnStart + 1; i < input.length; i++) {
+    for (let i = activeToolStart; i < input.length; i++) {
         const item = input[i];
         if (!item || typeof item !== "object") continue;
-        if (item.type !== "function_call" && item.type !== "function_call_output") continue;
+        if (item.type !== "function_call" && item.type !== "function_call_output" && item.type !== "custom_tool_call" && item.type !== "custom_tool_call_output") continue;
         const callId = item.call_id || item.id;
         if (callId) keepIds.add(callId);
     }
 
     let olderKept = 0;
-    for (let i = activeTurnStart >= 0 ? activeTurnStart - 1 : input.length - 1; i >= 0 && olderKept < MAX_RESTORED_TOOL_CALLS; i--) {
+    for (let i = activeTurnStart >= 0 ? activeTurnStart - 1 : activeToolStart - 1; i >= 0 && olderKept < MAX_RESTORED_TOOL_CALLS; i--) {
         const item = input[i];
         if (!item || typeof item !== "object") continue;
-        if (item.type !== "function_call" && item.type !== "function_call_output") continue;
+        if (item.type !== "function_call" && item.type !== "function_call_output" && item.type !== "custom_tool_call" && item.type !== "custom_tool_call_output") continue;
         const callId = item.call_id || item.id;
         if (callId && !keepIds.has(callId)) {
             keepIds.add(callId);
@@ -1099,13 +1162,13 @@ function pruneRestoredToolTranscripts(input) {
     const pruned = [];
     for (const item of input) {
         if (!item || typeof item !== "object") continue;
-        if (item.type === "function_call" || item.type === "function_call_output") {
+        if (item.type === "function_call" || item.type === "function_call_output" || item.type === "custom_tool_call" || item.type === "custom_tool_call_output") {
             const callId = item.call_id || item.id;
             if (!callId || !keepIds.has(callId)) {
                 omitted = true;
                 continue;
             }
-            pruned.push(clipRestoredToolOutput(item));
+            pruned.push(clipRestoredToolOutput(clipRestoredToolCall(item)));
             continue;
         }
         pruned.push(item);
@@ -1153,7 +1216,7 @@ function repairRestoredInput(input) {
             repaired.push(item);
         } else if (item.type === "context_compaction" && readableCompactionText(item)) {
             repaired.push(item);
-        } else if (lastDamaged < 0 && (item.type === "function_call" || item.type === "function_call_output" || item.type === "reasoning")) {
+        } else if (lastDamaged < 0 && (item.type === "function_call" || item.type === "function_call_output" || item.type === "custom_tool_call" || item.type === "custom_tool_call_output" || item.type === "reasoning")) {
             repaired.push(item);
         }
     }
