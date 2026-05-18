@@ -1608,7 +1608,9 @@ function assistantTextLooksLikeFutureToolPromise(text) {
     const zhThenAction = /(?:确认|检查|看一下|看看|读一下|读完|看完).{0,48}(?:然后|再|后).{0,24}(?:启动|运行|执行|安装|生成|创建|新建|写入|修改|渲染|导出|复制|移动|打开|跑|做|搭建|实现|落地|scaffold|skeleton)/i;
     const danglingActionLeadIn = /(?:看(?:看|一下)?|读(?:取|一下)?|列(?:出|一下)?|检查|打开|运行|执行|启动|安装|创建|新建|写入|修改|搜索|查(?:看|一下)?).{0,48}[：:]\s*$/i;
     const enCommandPromise = /\b(?:I(?:'ll| will| am going to)?|let me|now|next|then|directly)\b.{0,60}\b(?:npm|npx|pnpm|yarn|node|python|pip|powershell|cmd|bash|git|curl|remotion|vite|hyperframes|ffmpeg|magick|robocopy)\b/i;
-    return zhFuture.test(compact) || zhCommandPromise.test(compact) || zhThenAction.test(compact) || danglingActionLeadIn.test(compact) || enCommandPromise.test(compact);
+    const enActionPromise = /\b(?:I(?:'ll| will| am going to)|let me|now|next|then|continue|directly)\b.{0,80}\b(?:use|apply|retry|rerun|read|inspect|check|verify|confirm|search|fetch|run|execute|install|start|generate|create|write|edit|modify|update|add|insert|wire|patch|render|export|move|copy|delete|download|open|build|implement|finish|fix|scaffold)\b/i;
+    const enDanglingActionLeadIn = /\b(?:let me|I(?:'ll| will| am going to)|now|next|then|continue|directly)\b.{0,100}\b(?:use|apply|retry|rerun|read|inspect|check|verify|confirm|search|fetch|run|execute|install|start|generate|create|write|edit|modify|update|add|insert|wire|patch|render|export|move|copy|delete|download|open|build|implement|finish|fix|scaffold)\b.{0,40}[：:]\s*(?:\\d+\\s*)?$/i;
+    return zhFuture.test(compact) || zhCommandPromise.test(compact) || zhThenAction.test(compact) || danglingActionLeadIn.test(compact) || enCommandPromise.test(compact) || enActionPromise.test(compact) || enDanglingActionLeadIn.test(compact);
 }
 
 function completedResultsThenStatusDetour(text) {

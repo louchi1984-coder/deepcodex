@@ -382,6 +382,83 @@ test("chat response blocks dangling colon action after tool evidence", () => {
   assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
 });
 
+test("chat response blocks English dangling patch retry promise after failed patch", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "Patch body got clipped. Let me use the full content directly:" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "custom_tool_call", call_id: "call_patch", name: "apply_patch", input: "*** Begin Patch\n*** End Patch" },
+      { type: "custom_tool_call_output", call_id: "call_patch", output: "apply_patch verification failed: invalid patch: The last line of the patch must be '*** End Patch'" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+  assert.match(formatted.output[0].content[0].text, /没有实际 tool call/);
+});
+
+test("chat response blocks English direct write promise after tool evidence", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "I found the target files. Let me now write the implementation directly:" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_read", name: "exec_command", arguments: "{\"cmd\":\"sed -n '1,120p' src/App.jsx\"}" },
+      { type: "function_call_output", call_id: "call_read", output: "export default function App() {}" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("chat response blocks English dangling verification promise after tool evidence", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "Now I have the full picture. Let me check that the computeResultConsumption function is actually in the file:" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "custom_tool_call", call_id: "call_patch", name: "apply_patch", input: "*** Begin Patch\n*** End Patch" },
+      { type: "custom_tool_call_output", call_id: "call_patch", output: "{\"output\":\"Success. Updated the following files:\\nM runtime/codex/projections.mjs\\n\"}" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("chat response blocks English dangling update promise with numbered lead-in", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "I need to add consumption-first rendering. Let me update: 1" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_read", name: "exec_command", arguments: "{\"cmd\":\"sed -n '1,220p' SidePanel.jsx\"}" },
+      { type: "function_call_output", call_id: "call_read", output: "function TurnResultBlock() {}" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
 test("chat response blocks status-probe detour after results are ready", () => {
   const formatted = chatToResponsesFormat({
     choices: [{
