@@ -344,6 +344,94 @@ test("chat response still blocks future action promise even when prior tool evid
   assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
 });
 
+test("chat response blocks dangling skeleton promise after tool evidence", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "webbridge daemon 活了，extension_connected: false。现在先不管扩展连通——直接做 gemini-cli 的 skeleton：" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_status", name: "exec_command", arguments: "{\"cmd\":\"curl http://127.0.0.1:10086/status\"}" },
+      { type: "function_call_output", call_id: "call_status", output: "{\"extension_connected\":false,\"running\":true}" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("chat response blocks dangling colon action after tool evidence", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "看到 new-chat-3 了，这很可能就是 qwen 相关项目。看看它的内容：" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_ls", name: "exec_command", arguments: "{\"cmd\":\"ssh win-codex ls\"}" },
+      { type: "function_call_output", call_id: "call_ls", output: "new-chat-3" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("chat response blocks status-probe detour after results are ready", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "tool_calls",
+      message: {
+        role: "assistant",
+        content: "搜索已经跑完了，结果就在上面。让我确认一下 daemon 还在跑、工具链完整，然后给你最终总结。",
+        tool_calls: [{
+          id: "call_status",
+          type: "function",
+          function: {
+            name: "exec_command",
+            arguments: JSON.stringify({ cmd: "powershell -Command \"netstat -ano | findstr ':10086'\"" }),
+          },
+        }],
+      },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_search", name: "exec_command", arguments: "{\"cmd\":\"google-cli search AI\"}" },
+      { type: "function_call_output", call_id: "call_search", output: "{\"data\":[{\"title\":\"AI news\"}]}" },
+    ],
+  }, { exec_command: { type: "function", codexName: "exec_command" } });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+  assert.match(formatted.output[0].content[0].text, /最终回答/);
+  assert.ok(!formatted.output.some(item => item.type === "function_call"), "status probe should not be forwarded");
+});
+
+test("chat response allows factual blocker after tool evidence", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "webbridge daemon 活了，但 extension_connected 还是 false。需要先安装 Chrome 扩展，否则不能控制网页。" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_status", name: "exec_command", arguments: "{\"cmd\":\"curl http://127.0.0.1:10086/status\"}" },
+      { type: "function_call_output", call_id: "call_status", output: "{\"extension_connected\":false,\"running\":true}" },
+    ],
+  });
+
+  assert.doesNotMatch(formatted.output[0].content[0].text, /已拦截这轮回复/);
+  assert.match(formatted.output[0].content[0].text, /需要先安装 Chrome 扩展/);
+});
+
 test("chat response blocks web_search unavailable claim when only exec_command failed", () => {
   const formatted = chatToResponsesFormat({
     choices: [{
@@ -989,6 +1077,151 @@ test("restored history drops update_plan transcripts that churn prompt cache", (
   assert.ok(joined.includes("/tmp/project"));
 });
 
+test("restored history preserves durable tool facts before pruning noisy probes", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续当前跨工具任务。" },
+    { type: "function_call", call_id: "list", name: "exec_command", arguments: JSON.stringify({ cmd: "docker exec app ls /workspace" }) },
+    { type: "function_call_output", call_id: "list", output: "Chunk ID: ls\nWall time: 0s\nProcess exited with code 0\nOutput:\nnew-chat-3\nqwen-cli\nsrc\n" },
+    { type: "function_call", call_id: "read", name: "exec_command", arguments: JSON.stringify({ cmd: "docker exec app cat /workspace/qwen-cli/package.json" }) },
+    { type: "function_call_output", call_id: "read", output: "Chunk ID: read\nWall time: 0s\nProcess exited with code 0\nOutput:\n{\"name\":\"qwen-cli\"}\n" },
+    { type: "function_call", call_id: "build", name: "exec_command", arguments: JSON.stringify({ cmd: "docker exec app npm run build" }) },
+    { type: "function_call_output", call_id: "build", output: "Chunk ID: build\nWall time: 1s\nProcess exited with code 1\nOutput:\nError: missing script build\n" },
+    ...Array.from({ length: 20 }, (_, index) => ([
+      { type: "function_call", call_id: `old_${index}`, name: "exec_command", arguments: JSON.stringify({ cmd: `echo old-${index}` }) },
+      { type: "function_call_output", call_id: `old_${index}`, output: `old-output-${index}` },
+    ])).flat(),
+    { type: "message", role: "user", content: [{ type: "text", text: "继续看 qwen-cli" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /DeepCodex durable environment facts/);
+  assert.match(joined, /workspace: Listing result from docker exec app ls \/workspace: new-chat-3, qwen-cli, src/);
+  assert.match(joined, /tool-state: Read command succeeded: docker exec app cat \/workspace\/qwen-cli\/package\.json/);
+  assert.match(joined, /tool-state: Command failed, do not assume success: docker exec app npm run build -> Error: missing script build/);
+  assert.match(joined, /继续看 qwen-cli/);
+});
+
+test("restored history task ledger preserves explicit task target and pending action", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续当前任务。" },
+    { type: "message", role: "user", content: [{ type: "text", text: "帮我在 Windows 上找到 qwen-cli 项目，看看 new-chat-3 是不是相关。" }] },
+    { type: "function_call", call_id: "ls", name: "exec_command", arguments: JSON.stringify({ cmd: "ssh win-codex 'dir C:\\\\Users\\\\jz\\\\Documents\\\\Codex\\\\2026-05-14'" }) },
+    { type: "function_call_output", call_id: "ls", output: "new-chat-3\nremotion-demo\n" },
+    { type: "message", role: "assistant", content: [{ type: "text", text: "看到 new-chat-3 了，这很可能就是 qwen 相关项目。看看它的内容：" }] },
+    { type: "message", role: "user", content: [{ type: "text", text: "你倒是看啊" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /DeepCodex task ledger/);
+  assert.match(joined, /current-user-task: 帮我在 Windows 上找到 qwen-cli 项目/);
+  assert.match(joined, /pending-next-action: 看到 new-chat-3/);
+  assert.match(joined, /target-hint: qwen-cli/);
+  assert.match(joined, /target-hint: new-chat-3/);
+});
+
+test("restored history keeps successful non-shell tool calls as durable facts", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续处理浏览器标签页。" },
+    { type: "function_call", call_id: "close_1", name: "closeTab", arguments: JSON.stringify({ targetId: "tab-123", url: "https://example.com/search" }) },
+    { type: "function_call_output", call_id: "close_1", output: JSON.stringify({ ok: true, closed: true, targetId: "tab-123" }) },
+    { type: "message", role: "assistant", content: [{ type: "text", text: "抱歉，刚才的回复没有实际行动。让我现在验证一下。" }] },
+    { type: "message", role: "user", content: [{ type: "text", text: "刚才你已经成功关闭了" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /DeepCodex durable environment facts/);
+  assert.match(joined, /tool-state: Tool closeTab succeeded/);
+  assert.match(joined, /targetId=tab-123/);
+  assert.match(joined, /刚才你已经成功关闭了/);
+});
+
+test("restored history does not turn failed non-shell tool calls into success facts", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续处理浏览器标签页。" },
+    { type: "function_call", call_id: "close_1", name: "closeTab", arguments: JSON.stringify({ targetId: "tab-123" }) },
+    { type: "function_call_output", call_id: "close_1", output: JSON.stringify({ ok: false, error: "tab not found" }) },
+    { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /Tool closeTab failed, do not assume success/);
+  assert.doesNotMatch(joined, /Tool closeTab succeeded/);
+});
+
+test("restored history drops stale completion detours and paired status probes", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：用户要基于搜索结果总结 2026 年 AI 发展。" },
+    { type: "function_call", call_id: "search", name: "exec_command", arguments: JSON.stringify({ cmd: "google-cli search 2026 AI" }) },
+    { type: "function_call_output", call_id: "search", output: "Chunk ID: s\nWall time: 1s\nProcess exited with code 0\nOutput:\n{\"data\":[{\"title\":\"AI 2026\"}]}\n" },
+    { type: "message", role: "assistant", content: [{ type: "text", text: "搜索已经跑完了，结果就在上面。让我确认一下 daemon 还在跑、工具链完整，然后给你最终总结。" }] },
+    { type: "function_call", call_id: "status", name: "exec_command", arguments: JSON.stringify({ cmd: "netstat -ano | findstr ':10086'" }) },
+    { type: "function_call_output", call_id: "status", output: "Chunk ID: st\nWall time: 1s\nProcess exited with code 0\nOutput:\nTCP 127.0.0.1:10086 LISTENING\n" },
+    { type: "message", role: "user", content: [{ type: "text", text: "直接总结" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /omitted volatile restored polling/);
+  assert.doesNotMatch(joined, /让我确认一下 daemon/);
+  assert.doesNotMatch(joined, /findstr ':10086'/);
+  assert.match(joined, /2026 年 AI/);
+  assert.match(joined, /直接总结/);
+});
+
+test("restored history ledger preserves workspace and tool-state facts", () => {
+  const input = [
+    { type: "context_compaction", summary: "压缩摘要：继续找 qwen 项目。" },
+    { type: "function_call", call_id: "ls_day", name: "exec_command", arguments: JSON.stringify({ cmd: "ssh win-codex 'powershell -NoProfile -Command \"Get-ChildItem C:\\\\Users\\\\jz\\\\Documents\\\\Codex\\\\2026-05-14 -Name\"'" }) },
+    { type: "function_call_output", call_id: "ls_day", output: "Chunk ID: ls\nWall time: 1s\nProcess exited with code 0\nOutput:\nnew-chat-3\nqwen-cli\nremotion-demo\n" },
+    { type: "function_call", call_id: "read_pkg", name: "exec_command", arguments: JSON.stringify({ cmd: "ssh win-codex 'type C:\\\\Users\\\\jz\\\\Documents\\\\Codex\\\\2026-05-14\\\\new-chat-3\\\\package.json'" }) },
+    { type: "function_call_output", call_id: "read_pkg", output: "Chunk ID: read\nWall time: 1s\nProcess exited with code 0\nOutput:\n{\"name\":\"new-chat-3\"}\n" },
+    { type: "function_call", call_id: "build_fail", name: "exec_command", arguments: JSON.stringify({ cmd: "ssh win-codex 'npm run build'" }) },
+    { type: "function_call_output", call_id: "build_fail", output: "Chunk ID: build\nWall time: 1s\nProcess exited with code 1\nOutput:\nError: missing script build\n" },
+    ...Array.from({ length: 20 }, (_, index) => ([
+      { type: "function_call", call_id: `old_${index}`, name: "exec_command", arguments: JSON.stringify({ cmd: `echo old-${index}` }) },
+      { type: "function_call_output", call_id: `old_${index}`, output: `old-output-${index}` },
+    ])).flat(),
+    { type: "message", role: "user", content: [{ type: "text", text: "继续看 qwen" }] },
+  ];
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input,
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /workspace: Listing result/);
+  assert.match(joined, /new-chat-3/);
+  assert.match(joined, /qwen-cli/);
+  assert.match(joined, /tool-state: Read command succeeded/);
+  assert.match(joined, /tool-state: Command failed, do not assume success/);
+  assert.match(joined, /missing script build/);
+});
+
 test("restored custom tool calls replay as Chat tool calls", () => {
   const body = responsesToChatBody({
     model: "gpt-5.5",
@@ -1047,6 +1280,55 @@ test("restored long source outputs are folded but important errors are preserved
   assert.match(joined, /const value159/);
   assert.doesNotMatch(joined, /const value80/);
   assert.match(joined, /SyntaxError: Unexpected token/);
+});
+
+test("restored documentation dumps are folded earlier than source dumps", () => {
+  const doc = [
+    "# x-cli",
+    "",
+    "你想在网页上反复做的事，一句话告诉 AI agent，它就能帮你做成 CLI。",
+    "",
+    "## Usage",
+    "- install",
+    "- login",
+    "- run",
+    "",
+    "## Site Exploration Protocol",
+    ...Array.from({ length: 120 }, (_, i) => `- step ${i}: read the page and record the result`),
+    "",
+    "## Reference",
+    "Keep this tail marker.",
+  ].join("\n");
+
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_doc", name: "exec_command", arguments: JSON.stringify({ cmd: "cat README.md" }) },
+      { type: "function_call_output", call_id: "call_doc", output: doc },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  const joined = JSON.stringify(body.messages);
+  assert.match(joined, /DeepCodex folded/);
+  assert.match(joined, /# x-cli/);
+  assert.match(joined, /Keep this tail marker/);
+  assert.doesNotMatch(joined, /step 60/);
+});
+
+test("successful patch outputs are summarized for restored cache stability", () => {
+  const body = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [
+      { type: "custom_tool_call", call_id: "call_patch", name: "apply_patch", input: "*** Begin Patch\n*** End Patch" },
+      { type: "custom_tool_call_output", call_id: "call_patch", output: "Success. Updated the following files:\nM /tmp/project/src/a.ts\nM /tmp/project/src/b.ts\n" },
+      { type: "message", role: "user", content: [{ type: "text", text: "继续" }] },
+    ],
+  }, { allowTools: false, injectInternalTools: false });
+
+  assert.match(body.messages[1].content, /patch applied successfully/);
+  assert.match(body.messages[1].content, /M \/tmp\/project\/src\/a\.ts/);
+  assert.doesNotMatch(body.messages[1].content, /Success\. Updated/);
 });
 
 test("deepcodex reasoning blob is replayed onto following Chat tool calls", () => {

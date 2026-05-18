@@ -43,6 +43,7 @@ const MAX_RESTORED_TOOL_CALLS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_
 const MAX_RESTORED_TOOL_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_OUTPUT_CHARS || 4000);
 const MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS || 1200);
 const MAX_RESTORED_SOURCE_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_SOURCE_OUTPUT_CHARS || 1200);
+const MAX_RESTORED_DOC_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_DOC_OUTPUT_CHARS || 900);
 const DEBUG_UPSTREAM = process.env.DEEPCODEX_DEBUG_UPSTREAM === "1" || process.env.TRANSLATOR_DEBUG_UPSTREAM === "1";
 const RESPONSES_PATHS = new Set(["/responses", "/v1/responses", "/responses/compact", "/v1/responses/compact"]);
 const REASONING_BLOB_PREFIX = "deepcodex.reasoning.hex.v1:";
@@ -959,15 +960,39 @@ function normalizeRestoredToolOutput(output) {
     if (!text) {
         return "[DeepCodex tool result: command completed with no stdout after removing transport noise.]";
     }
+    if (isSuccessfulPatchOutput(text)) {
+        return summarizeSuccessfulPatchOutput(text);
+    }
     if (isImportantToolError(text)) return text;
-    if (!looksLikeSourceDump(text) || text.length <= MAX_RESTORED_SOURCE_OUTPUT_CHARS) return text;
-    const headChars = Math.floor(MAX_RESTORED_SOURCE_OUTPUT_CHARS * 0.62);
-    const tailChars = MAX_RESTORED_SOURCE_OUTPUT_CHARS - headChars;
+    const limit = restoredOutputFoldLimit(text);
+    if (!limit || text.length <= limit) return text;
+    const headChars = Math.floor(limit * 0.62);
+    const tailChars = limit - headChars;
     return [
         text.slice(0, headChars).trimEnd(),
-        `\n...[DeepCodex folded ${text.length - headChars - tailChars} chars from a long source/code listing to keep prompt cache stable. Re-read the exact file/range if more context is needed.]...\n`,
+        `\n...[DeepCodex folded ${text.length - headChars - tailChars} chars from a long restored tool output to keep prompt cache stable. Re-read the exact file/range if more context is needed.]...\n`,
         text.slice(-tailChars).trimStart(),
     ].join("");
+}
+
+function restoredOutputFoldLimit(text) {
+    if (looksLikeDocumentationDump(text)) return MAX_RESTORED_DOC_OUTPUT_CHARS;
+    if (looksLikeSourceDump(text)) return MAX_RESTORED_SOURCE_OUTPUT_CHARS;
+    return 0;
+}
+
+function isSuccessfulPatchOutput(text) {
+    return /Success\. Updated the following files:/i.test(text) && !isImportantToolError(text.replace(/Success\. Updated the following files:/i, ""));
+}
+
+function summarizeSuccessfulPatchOutput(text) {
+    const files = text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => /^[AMDR]\s+/.test(line))
+        .slice(0, 12);
+    const suffix = files.length ? `\n${files.join("\n")}` : "";
+    return `[DeepCodex tool result: patch applied successfully.${files.length ? " Updated files:" : ""}${suffix}]`;
 }
 
 function isImportantToolError(text) {
@@ -985,6 +1010,15 @@ function looksLikeSourceDump(text) {
     const numbered = lines.filter(line => /^\s*\d+[:\t ]/.test(line)).length;
     const codeish = lines.filter(line => /[{}();=<>]|\b(function|const|let|var|import|export|class|return|case|if|else)\b/.test(line)).length;
     return numbered >= 8 || codeish / lines.length > 0.35;
+}
+
+function looksLikeDocumentationDump(text) {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (text.length < MAX_RESTORED_DOC_OUTPUT_CHARS) return false;
+    const headings = lines.filter(line => /^\s{0,3}#{1,6}\s+\S/.test(line)).length;
+    const bullets = lines.filter(line => /^\s{0,4}([-*+]|\d+\.)\s+\S/.test(line)).length;
+    const markdownSignals = /```|^---$|\b(SKILL|README|Usage|Install|Examples?|Protocol|Reference|指南|用法|安装|示例|协议|参考)\b/im.test(text);
+    return headings >= 2 || (markdownSignals && bullets + headings >= 4);
 }
 
 function clipRestoredToolCall(item) {
@@ -1039,6 +1073,7 @@ function isVolatileRestoredToolCall(item) {
     if (item.name === "update_plan") return true;
     const text = restoredToolCallText(item);
     if (item.name === "write_stdin" && /\bsession_id\b|\byield_time_ms\b/.test(text)) return true;
+    if (item.name === "exec_command" && commandLooksLikeStatusProbe(text)) return true;
     return [
         /\bStart-Sleep\b/i,
         /\bGet-Process\b/i,
@@ -1064,6 +1099,7 @@ function isVolatileRestoredToolOutput(item) {
 function isVolatileRestoredMessage(item) {
     if (!item || typeof item !== "object" || item.type !== "message") return false;
     const text = textFromMessageContent(item.content);
+    if (completedResultsThenStatusDetour(text)) return true;
     return [
         /^<turn_aborted>/,
         /Reconnecting\.\.\.\s*\d\/\d/i,
@@ -1073,6 +1109,277 @@ function isVolatileRestoredMessage(item) {
         /又超时了/i,
         /while \(Get-Process/i,
     ].some(re => re.test(text.trim()));
+}
+
+function parseRestoredCommandArgs(item) {
+    if (!item || typeof item !== "object" || item.type !== "function_call" || item.name !== "exec_command") return "";
+    const raw = item.arguments;
+    if (typeof raw !== "string") return "";
+    try {
+        const parsed = JSON.parse(raw);
+        return typeof parsed?.cmd === "string" ? parsed.cmd : "";
+    } catch {
+        return raw;
+    }
+}
+
+function commandLooksLikeListing(cmd) {
+    return /\b(ls|find|dir|Get-ChildItem|gci)\b/i.test(cmd);
+}
+
+function commandLooksLikeRead(cmd) {
+    return /\b(cat|type|Get-Content|sed|head|tail|rg)\b/i.test(cmd);
+}
+
+function commandLooksLikeWrite(cmd) {
+    return /\b(apply_patch|cat\s*>|Set-Content|Out-File|Copy-Item|Move-Item|mkdir|New-Item|touch)\b/i.test(cmd);
+}
+
+function commandLooksLikeBuildOrInstall(cmd) {
+    return /\b(npm|npx|pnpm|yarn|node|go|python|pip|uv|cargo|remotion|vite|hyperframes)\b/i.test(cmd);
+}
+
+function commandLooksLikeStatusProbe(cmd) {
+    const text = String(cmd || "");
+    return [
+        /\b(netstat|lsof|ss)\b/i,
+        /\b(Get-Process|tasklist|ps\b|pgrep|pidof|Get-Service|sc\s+query)\b/i,
+        /\b(Measure-Object|Select-Object\s+-ExpandProperty\s+Count)\b/i,
+        /\b(curl|Invoke-WebRequest|Invoke-RestMethod)\b[\s\S]{0,120}\b(health|status|debug\/routes|\/api\/ps|\/version)\b/i,
+        /\bfindstr\b[\s\S]{0,80}:\d{2,5}/i,
+    ].some(re => re.test(text));
+}
+
+function parseExitCode(output) {
+    const match = String(output || "").match(/Process exited with code\s+(-?\d+)/i);
+    return match ? Number(match[1]) : null;
+}
+
+function parseJsonish(value) {
+    if (value == null) return null;
+    if (typeof value === "object") return value;
+    if (typeof value !== "string") return null;
+    const text = value.trim();
+    if (!text || !/^[{[]/.test(text)) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
+
+function quoteFactValue(value, max = 160) {
+    return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function extractCleanOutputLines(output) {
+    return stripVolatileToolOutput(output)
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .filter(line => !/^Microsoft Windows \[/.test(line))
+        .filter(line => !/^\(c\) Microsoft Corporation/i.test(line))
+        .filter(line => !/^[A-Za-z0-9_.-]+@[^>]+>/.test(line));
+}
+
+function extractLikelyPathFacts(lines) {
+    const facts = [];
+    for (const line of lines) {
+        const value = line.trim();
+        if (!value || value.length > 240) continue;
+        if (/^(Permission denied|File not found|cannot access|SyntaxError|ParserError|FINDSTR:)/i.test(value)) continue;
+        const looksPath = /^(?:[A-Za-z]:\\|\/Users\/|\/home\/|\.\/|\.\.\/|[A-Za-z0-9_.-]+\/)[^\n]+/.test(value);
+        const looksProjectName = /^[A-Za-z0-9][A-Za-z0-9_.@+-]{2,80}$/.test(value);
+        if (looksPath || looksProjectName) facts.push(value);
+        if (facts.length >= 6) break;
+    }
+    return facts;
+}
+
+function summarizeToolCallArgs(call) {
+    if (!call) return "";
+    const parsed = parseJsonish(call.arguments ?? call.input);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const keys = ["app", "target", "targetId", "element", "path", "url", "query", "cmd", "action", "sessionId", "resourceId"];
+        const parts = [];
+        for (const key of keys) {
+            const value = parsed[key];
+            if (typeof value === "string" && value.trim()) parts.push(`${key}=${quoteFactValue(value, 70)}`);
+            if (typeof value === "number" || typeof value === "boolean") parts.push(`${key}=${String(value)}`);
+            if (parts.length >= 3) break;
+        }
+        if (parts.length) return parts.join(", ");
+    }
+    if (typeof call.input === "string" && call.input.trim()) return quoteFactValue(call.input, 120);
+    if (typeof call.arguments === "string" && call.arguments.trim()) return quoteFactValue(call.arguments, 120);
+    return "";
+}
+
+function toolOutputLooksFailed(output, parsedOutput) {
+    if (parsedOutput && typeof parsedOutput === "object") {
+        if (parsedOutput.ok === false || parsedOutput.success === false) return true;
+        if (typeof parsedOutput.error === "string" && parsedOutput.error.trim()) return true;
+        if (parsedOutput.error && typeof parsedOutput.error === "object") return true;
+        if (typeof parsedOutput.status === "string" && /fail|error|denied|unsupported/i.test(parsedOutput.status)) return true;
+    }
+    return /\b(error|failed|failure|denied|not permitted|unsupported|unavailable|timeout|timed out|exception)\b/i.test(String(output || ""));
+}
+
+function toolOutputLooksSuccessful(output, parsedOutput) {
+    if (parsedOutput && typeof parsedOutput === "object") {
+        if (parsedOutput.ok === true || parsedOutput.success === true || parsedOutput.closed === true) return true;
+        if (Array.isArray(parsedOutput)) return true;
+        if (Object.keys(parsedOutput).length && !toolOutputLooksFailed(output, parsedOutput)) return true;
+    }
+    const text = String(output || "").trim();
+    return Boolean(text) && !toolOutputLooksFailed(text, parsedOutput);
+}
+
+function collectDurableToolFacts(input) {
+    if (!Array.isArray(input)) return [];
+    const calls = new Map();
+    const toolCalls = new Map();
+    const facts = new Map();
+    function addFact(kind, fact) {
+        const text = quoteFactValue(fact, 240);
+        if (!text) return;
+        if (!facts.has(kind)) facts.set(kind, []);
+        const list = facts.get(kind);
+        if (!list.includes(text) && list.length < 6) list.push(text);
+    }
+
+    for (const item of input) {
+        if (!item || typeof item !== "object") continue;
+        if (item.type === "function_call" && item.name === "exec_command") {
+            const callId = item.call_id || item.id;
+            if (callId) calls.set(callId, parseRestoredCommandArgs(item));
+            if (callId) toolCalls.set(callId, { name: item.name, arguments: item.arguments, input: item.input, type: item.type });
+            continue;
+        }
+        if (item.type === "function_call" || item.type === "custom_tool_call") {
+            const callId = item.call_id || item.id;
+            if (callId) toolCalls.set(callId, { name: item.name || item.type, arguments: item.arguments, input: item.input, type: item.type });
+            continue;
+        }
+        if (item.type !== "function_call_output" && item.type !== "custom_tool_call_output") continue;
+        const callId = item.call_id || item.id;
+        const cmd = calls.get(callId) || "";
+        const output = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+        const toolCall = toolCalls.get(callId);
+        const clean = stripVolatileToolOutput(output);
+        const exitCode = parseExitCode(output);
+        const ok = exitCode === 0;
+        const failed = exitCode !== null && exitCode !== 0;
+        const lines = extractCleanOutputLines(output);
+
+        if (ok && commandLooksLikeListing(cmd)) {
+            const pathFacts = extractLikelyPathFacts(lines);
+            if (pathFacts.length) addFact("workspace", `Listing result from ${quoteFactValue(cmd, 90)}: ${pathFacts.slice(0, 6).join(", ")}`);
+        }
+
+        if (ok && commandLooksLikeRead(cmd)) {
+            const first = lines.find(line => line && line.length <= 180);
+            if (first) addFact("tool-state", `Read command succeeded: ${quoteFactValue(cmd, 120)}`);
+        }
+
+        if (ok && commandLooksLikeWrite(cmd)) {
+            addFact("tool-state", `Write/change command succeeded: ${quoteFactValue(cmd, 120)}`);
+        }
+
+        if (ok && commandLooksLikeBuildOrInstall(cmd)) {
+            const first = lines.find(line => line && line.length <= 180);
+            addFact("tool-state", `Build/install command succeeded: ${quoteFactValue(cmd, 120)}${first ? ` -> ${quoteFactValue(first, 90)}` : ""}`);
+        }
+
+        if (failed && (commandLooksLikeBuildOrInstall(cmd) || commandLooksLikeRead(cmd) || commandLooksLikeListing(cmd))) {
+            const failureLine = lines.find(line => /error|failed|cannot|not found|Permission denied|SyntaxError|ParserError|exit/i.test(line)) || lines[0] || `exit ${exitCode}`;
+            addFact("tool-state", `Command failed, do not assume success: ${quoteFactValue(cmd, 100)} -> ${quoteFactValue(failureLine, 140)}`);
+        }
+
+        if (toolCall && toolCall.type === "function_call" && !["exec_command", "update_plan"].includes(toolCall.name)) {
+            const parsedOutput = parseJsonish(item.output);
+            const failedTool = exitCode !== null ? exitCode !== 0 : toolOutputLooksFailed(output, parsedOutput);
+            const okTool = exitCode === 0 || (exitCode === null && toolOutputLooksSuccessful(output, parsedOutput));
+            const name = quoteFactValue(toolCall.name || "tool", 80);
+            const args = summarizeToolCallArgs(toolCall);
+            if (okTool && !failedTool) {
+                addFact("tool-state", `Tool ${name} succeeded${args ? ` (${args})` : ""}`);
+            } else if (failedTool) {
+                const failureLine = lines.find(line => /error|failed|cannot|not found|Permission denied|unsupported|timeout|denied/i.test(line)) || lines[0] || "failed";
+                addFact("tool-state", `Tool ${name} failed, do not assume success${args ? ` (${args})` : ""}: ${quoteFactValue(failureLine, 120)}`);
+            }
+        }
+    }
+
+    return Array.from(facts.entries())
+        .flatMap(([kind, values]) => values.map(value => `${kind}: ${value}`))
+        .slice(0, 12);
+}
+
+function collectTaskLedgerFacts(input) {
+    if (!Array.isArray(input)) return [];
+    const facts = [];
+    const push = (label, text) => {
+        const value = quoteFactValue(text, 260);
+        if (!value) return;
+        const line = `${label}: ${value}`;
+        if (!facts.includes(line)) facts.push(line);
+    };
+    const recentMessages = input
+        .filter(item => item?.type === "message" && ["user", "assistant"].includes(item.role))
+        .slice(-10);
+    const userMessages = recentMessages.filter(item => item.role === "user").map(item => textFromMessageContent(item.content)).filter(Boolean);
+    const assistantMessages = recentMessages.filter(item => item.role === "assistant").map(item => textFromMessageContent(item.content)).filter(Boolean);
+    const meaningfulUser = userMessages
+        .filter(text => !/^<turn_aborted>/.test(text.trim()))
+        .filter(text => !/^(继续|好|嗯|可以|ok|OK|你倒是看啊|我操你妈|操你妈的)\s*[。.!！?？]*$/.test(text.trim()));
+    const lastTask = meaningfulUser.at(-1);
+    if (lastTask) push("current-user-task", lastTask);
+    const lastAssistant = assistantMessages.at(-1);
+    if (lastAssistant && assistantTextLooksLikeFutureToolPromise(lastAssistant)) {
+        push("pending-next-action", lastAssistant);
+    }
+    const targetHints = [...userMessages, ...assistantMessages].join("\n").match(/(?:[A-Za-z]:\\[^\s"'，。；;]+|\/Users\/[^\s"'，。；;]+|(?:new-chat-\d+|qwen[-_\w]*|gemini[-_\w]*|remotion[-_\w]*|deepcodex[-_\w]*))/g) || [];
+    for (const hint of targetHints.slice(-6)) push("target-hint", hint);
+    return facts.slice(0, 10);
+}
+
+function injectTaskLedgerFacts(input) {
+    const isRestoredThread = Array.isArray(input) && input.some(item => item?.type === "context_compaction");
+    if (!isRestoredThread) return input;
+    const facts = collectTaskLedgerFacts(input);
+    if (!facts.length) return input;
+    const alreadyPresent = input.some(item => item?.type === "context_compaction" && /DeepCodex task ledger/.test(readableCompactionText(item)));
+    if (alreadyPresent) return input;
+    return [
+        {
+            type: "context_compaction",
+            summary: [
+                "DeepCodex task ledger from recent explicit user/assistant text:",
+                ...facts.map(fact => `- ${fact}`),
+                "Preserve the task goal and pending next action across compaction. Do not replace the user's target with environment guesses.",
+            ].join("\n"),
+        },
+        ...input,
+    ];
+}
+
+function injectDurableToolFacts(input) {
+    const facts = collectDurableToolFacts(input);
+    if (!facts.length) return input;
+    const alreadyPresent = input.some(item => item?.type === "context_compaction" && /DeepCodex durable environment facts/.test(readableCompactionText(item)));
+    if (alreadyPresent) return input;
+    return [
+        {
+            type: "context_compaction",
+            summary: [
+                "DeepCodex durable environment facts from verified tool results:",
+                ...facts.map(fact => `- ${fact}`),
+                "Use these facts before guessing environment details. If a later probe contradicts them, verify with a tool call before changing course.",
+            ].join("\n"),
+        },
+        ...input,
+    ];
 }
 
 function dropVolatileRestoredItems(input) {
@@ -1190,6 +1497,8 @@ function pruneRestoredToolTranscripts(input) {
 function repairRestoredInput(input) {
     if (!Array.isArray(input)) return input;
     input = dropVolatileRestoredItems(input);
+    input = injectTaskLedgerFacts(input);
+    input = injectDurableToolFacts(input);
     let lastDamaged = -1;
     let lastReadableCompact = -1;
     for (let i = 0; i < input.length; i++) {
@@ -1291,11 +1600,33 @@ function assistantTextLooksLikeFutureToolPromise(text) {
     const value = String(text || "").trim();
     if (!value) return false;
     const compact = value.replace(/\s+/g, " ");
-    const zhFuture = /(?:先|现在|马上|接下来|继续|我来|开始|准备|直接).{0,36}(?:读|读取|查看|检查|搜|搜索|运行|执行|安装|启动|生成|创建|写|写入|修改|补丁|打补丁|patch|渲染|导出|移动|复制|删除|下载|打开|跑)/i;
+    const factualBlocker = /(?:需要|必须|请你|用户|否则|不能|无法|还没有|没有|缺少).{0,40}(?:安装|连接|启用|配置|授权|允许|打开|接入).{0,80}(?:否则|不能|无法|才(?:能|可以)|后(?:才|就))/i;
+    const explicitSelfAction = /(?:现在|马上|接下来|继续|我来|开始|准备|直接).{0,36}(?:读|读取|查看|检查|搜|搜索|运行|执行|安装|启动|生成|创建|新建|写|写入|修改|补丁|打补丁|patch|渲染|导出|移动|复制|删除|下载|打开|跑|做|搭建|实现|落地|scaffold|skeleton)/i;
+    if (factualBlocker.test(compact) && !explicitSelfAction.test(compact)) return false;
+    const zhFuture = /(?:先|现在|马上|接下来|继续|我来|开始|准备|直接).{0,36}(?:读|读取|查看|检查|搜|搜索|运行|执行|安装|启动|生成|创建|新建|写|写入|修改|补丁|打补丁|patch|渲染|导出|移动|复制|删除|下载|打开|跑|做|搭建|实现|落地|scaffold|skeleton)/i;
     const zhCommandPromise = /(?:先|现在|马上|接下来|继续|我来|开始|准备|直接|然后|用|使用).{0,48}(?:npm|npx|pnpm|yarn|node|python|pip|powershell|cmd|bash|git|curl|remotion|vite|hyperframes|ffmpeg|magick|robocopy|copy-item|start-process)\b/i;
-    const zhThenAction = /(?:确认|检查|看一下|看看|读一下|读完|看完).{0,48}(?:然后|再|后).{0,24}(?:启动|运行|执行|安装|生成|写入|修改|渲染|导出|复制|移动|打开|跑)/i;
+    const zhThenAction = /(?:确认|检查|看一下|看看|读一下|读完|看完).{0,48}(?:然后|再|后).{0,24}(?:启动|运行|执行|安装|生成|创建|新建|写入|修改|渲染|导出|复制|移动|打开|跑|做|搭建|实现|落地|scaffold|skeleton)/i;
+    const danglingActionLeadIn = /(?:看(?:看|一下)?|读(?:取|一下)?|列(?:出|一下)?|检查|打开|运行|执行|启动|安装|创建|新建|写入|修改|搜索|查(?:看|一下)?).{0,48}[：:]\s*$/i;
     const enCommandPromise = /\b(?:I(?:'ll| will| am going to)?|let me|now|next|then|directly)\b.{0,60}\b(?:npm|npx|pnpm|yarn|node|python|pip|powershell|cmd|bash|git|curl|remotion|vite|hyperframes|ffmpeg|magick|robocopy)\b/i;
-    return zhFuture.test(compact) || zhCommandPromise.test(compact) || zhThenAction.test(compact) || enCommandPromise.test(compact);
+    return zhFuture.test(compact) || zhCommandPromise.test(compact) || zhThenAction.test(compact) || danglingActionLeadIn.test(compact) || enCommandPromise.test(compact);
+}
+
+function completedResultsThenStatusDetour(text) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (!value) return false;
+    const saysResultsReady = /(?:结果|搜索|检索|资料|信息|tool results?|results?).{0,24}(?:已|已经|跑完|完成|够了|就在上面|collected|ready|done|complete)/i.test(value)
+        || /(?:已|已经).{0,20}(?:搜索|检索|收集).{0,20}(?:完成|完|到|好)/i.test(value);
+    const saysFinalAnswer = /(?:最终|总结|回答|盘点|整理|答复|final|answer|summary)/i.test(value);
+    const saysStatusDetour = /(?:确认|检查|看一下|verify|check).{0,36}(?:环境|工具链|连接|进程|端口|daemon|服务|窗口|状态|health|status|toolchain)/i.test(value);
+    return saysResultsReady && saysFinalAnswer && saysStatusDetour;
+}
+
+function detourBlockedMessage() {
+    return [
+        "DeepCodex 已拦截这轮回复：模型已经声明结果足够并应进入最终回答，但又发起了状态/环境确认工具调用。",
+        "实际要求：除非用户明确要求诊断工具链、进程、端口或窗口，否则不要把辅助环境检查升级成主任务。",
+        "请继续时基于已有工具结果直接回答用户的主问题；如果证据不足，只说明缺什么证据。",
+    ].join("\n");
 }
 
 function blockedToolClaimMessage() {
@@ -1435,6 +1766,41 @@ function guardAssistantToolClaims(output, originalRequest = null) {
     return changed ? guarded : output;
 }
 
+function outputTextParts(output) {
+    return (output || [])
+        .filter(item => item?.type === "message" && Array.isArray(item.content))
+        .flatMap(item => item.content)
+        .filter(part => part?.type === "output_text")
+        .map(part => part.text || "")
+        .filter(Boolean);
+}
+
+function outputToolCalls(output) {
+    return (output || []).filter(item => item?.type === "function_call" || item?.type === "custom_tool_call");
+}
+
+function toolCallLooksLikeStatusProbe(item) {
+    if (!item || item.type !== "function_call") return false;
+    if (item.name !== "exec_command") return false;
+    return commandLooksLikeStatusProbe(parseRestoredCommandArgs(item));
+}
+
+function guardCompletionStatusDetours(output) {
+    const toolCalls = outputToolCalls(output);
+    if (!toolCalls.length) return output;
+    const text = outputTextParts(output).join("\n");
+    if (!completedResultsThenStatusDetour(text)) return output;
+    const statusProbeCalls = toolCalls.filter(toolCallLooksLikeStatusProbe);
+    if (!statusProbeCalls.length || statusProbeCalls.length !== toolCalls.length) return output;
+    return [{
+        type: "message",
+        id: messageId(),
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: detourBlockedMessage(), annotations: [] }],
+    }];
+}
+
 function chatToResponsesFormat(json, original, routing = null) {
     const originalRequest = originalRequestFromArg(original);
     const choice = json.choices?.[0] || {};
@@ -1477,12 +1843,13 @@ function chatToResponsesFormat(json, original, routing = null) {
         output.push({ type: "message", id: messageId(), role: "assistant", status: "completed", content: [{ type: "output_text", text: "Internal tool request was intercepted but could not be completed in this turn. Please retry with a narrower request or a specific URL.", annotations: [] }] });
     }
     const finishReason = choice.finish_reason;
+    const guardedOutput = guardAssistantToolClaims(guardCompletionStatusDetours(output), originalRequest);
     return responseShell(originalRequest, {
         id: json.id || responseId(),
         created: json.created || Math.floor(Date.now() / 1000),
         model: json.model || originalRequest.model || "gpt-5.5",
         status: responseStatus(finishReason),
-        output: guardAssistantToolClaims(output, originalRequest),
+        output: guardedOutput,
         usage: mapUsage(json.usage),
         finishReason,
     });
