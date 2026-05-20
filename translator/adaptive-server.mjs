@@ -39,7 +39,7 @@ const PROFILE_PATH = process.env.TRANSLATOR_PROFILE_PATH || "";
 const MAX_TOOL_LOOPS = Number(process.env.TRANSLATOR_MAX_TOOL_LOOPS || 12);
 const MAX_FAKE_TOOL_CLAIM_REPLAYS = Number(process.env.TRANSLATOR_MAX_FAKE_TOOL_CLAIM_REPLAYS || 2);
 const MAX_RESTORED_INPUT_ITEMS = Number(process.env.TRANSLATOR_MAX_RESTORED_INPUT_ITEMS || 220);
-const MAX_RESTORED_TOOL_CALLS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_CALLS || 12);
+const MAX_RESTORED_TOOL_CALLS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_CALLS || 6);
 const MAX_RESTORED_TOOL_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_TOOL_OUTPUT_CHARS || 4000);
 const MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_CUSTOM_TOOL_INPUT_CHARS || 1200);
 const MAX_RESTORED_SOURCE_OUTPUT_CHARS = Number(process.env.TRANSLATOR_MAX_RESTORED_SOURCE_OUTPUT_CHARS || 1200);
@@ -1591,9 +1591,10 @@ function assistantTextLooksLikeUnsupportedToolClaim(text) {
     const value = String(text || "").trim();
     if (!value) return false;
     const compact = value.replace(/\s+/g, " ");
-    const zhDone = /(?:已|已经|刚才|我(?:已经)?|这里|现在).{0,36}(?:读完|读取|查看|检查|搜到|搜索到|运行|执行|安装|启动|生成|创建|写入|修改|补丁|打上|渲染|导出|移动|复制|删除|下载|打开|跑起来|跑完)/i;
+    const zhDone = /(?:已|已经|刚才|我(?:已经)?|这里|现在).{0,36}(?:读完|读取|读了|查看|看了|检查|搜到|搜索到|查到|找到|运行|执行|安装|启动|生成|创建|写入|修改|补丁|打上|渲染|导出|移动|复制|删除|下载|打开|跑起来|跑完)/i;
+    const zhDoneVerbFirst = /(?:搜到|搜索到|查到|找到|看了|读了|跑完|装好|写好|改好|生成好).{0,80}(?:结果|案例|资料|文件|页面|仓库|showcase|GitHub|官方|内容|数据)/i;
     const enClaim = /\b(?:I\s+(?:have\s+)?(?:installed|started|ran|read|generated|moved|copied|searched|fetched|opened|wrote|patched|downloaded|rendered)|(?:installed|started|ran|read|generated|moved|copied|searched|fetched|opened|wrote|patched|downloaded|rendered)\b)/i;
-    return assistantTextLooksLikeFutureToolPromise(compact) || zhDone.test(compact) || enClaim.test(compact);
+    return assistantTextLooksLikeFutureToolPromise(compact) || zhDone.test(compact) || zhDoneVerbFirst.test(compact) || enClaim.test(compact);
 }
 
 function assistantTextLooksLikeFutureToolPromise(text) {
@@ -1608,8 +1609,8 @@ function assistantTextLooksLikeFutureToolPromise(text) {
     const zhThenAction = /(?:确认|检查|看一下|看看|读一下|读完|看完).{0,48}(?:然后|再|后).{0,24}(?:启动|运行|执行|安装|生成|创建|新建|写入|修改|渲染|导出|复制|移动|打开|跑|做|搭建|实现|落地|scaffold|skeleton)/i;
     const danglingActionLeadIn = /(?:看(?:看|一下)?|读(?:取|一下)?|列(?:出|一下)?|检查|打开|运行|执行|启动|安装|创建|新建|写入|修改|搜索|查(?:看|一下)?).{0,48}[：:]\s*$/i;
     const enCommandPromise = /\b(?:I(?:'ll| will| am going to)?|let me|now|next|then|directly)\b.{0,60}\b(?:npm|npx|pnpm|yarn|node|python|pip|powershell|cmd|bash|git|curl|remotion|vite|hyperframes|ffmpeg|magick|robocopy)\b/i;
-    const enActionPromise = /\b(?:I(?:'ll| will| am going to)|let me|now|next|then|continue|directly)\b.{0,80}\b(?:use|apply|retry|rerun|read|inspect|check|verify|confirm|search|fetch|run|execute|install|start|generate|create|write|edit|modify|update|add|insert|wire|patch|render|export|move|copy|delete|download|open|build|implement|finish|fix|scaffold)\b/i;
-    const enDanglingActionLeadIn = /\b(?:let me|I(?:'ll| will| am going to)|now|next|then|continue|directly)\b.{0,100}\b(?:use|apply|retry|rerun|read|inspect|check|verify|confirm|search|fetch|run|execute|install|start|generate|create|write|edit|modify|update|add|insert|wire|patch|render|export|move|copy|delete|download|open|build|implement|finish|fix|scaffold)\b.{0,40}[：:]\s*(?:\\d+\\s*)?$/i;
+    const enActionPromise = /\b(?:I(?:'ll| will| am going to)|let me|now|next|then|continue|directly)\b.{0,80}\b(?:use|apply|retry|rerun|read|inspect|check|verify|confirm|get|find|locate|gather|collect|search|fetch|run|execute|install|start|generate|create|write|edit|modify|update|add|insert|wire|patch|render|export|move|copy|delete|download|open|build|implement|finish|fix|scaffold|see|look|examine|trace|follow)\b/i;
+    const enDanglingActionLeadIn = /\b(?:let me|I(?:'ll| will| am going to)|now|next|then|continue|directly)\b.{0,120}\b(?:use|apply|retry|rerun|read|inspect|check|verify|confirm|get|find|locate|gather|collect|search|fetch|run|execute|install|start|generate|create|write|edit|modify|update|add|insert|wire|patch|render|export|move|copy|delete|download|open|build|implement|finish|fix|scaffold|see|look|examine|trace|follow)\b.{0,60}[：:]\s*(?:\\d+\\s*)?$/i;
     return zhFuture.test(compact) || zhCommandPromise.test(compact) || zhThenAction.test(compact) || danglingActionLeadIn.test(compact) || enCommandPromise.test(compact) || enActionPromise.test(compact) || enDanglingActionLeadIn.test(compact);
 }
 
@@ -1727,6 +1728,7 @@ function messagesHaveToolOutputFor(messages, names = []) {
 
 function shouldBlockAssistantToolClaim(text, { hasToolEvidence = false, hasToolCall = false, hasWebToolEvidence = false } = {}) {
     if (hasToolCall) return false;
+    if (!assistantTextLooksLikeWebToolUnavailableClaim(text) && assistantTextLooksLikeHonestNoEvidenceBlocker(text)) return false;
     if (assistantTextLooksLikeWebToolUnavailableClaim(text) && !hasWebToolEvidence) return true;
     if (!assistantTextLooksLikeUnsupportedToolClaim(text)) return false;
     // Once the turn already has real tool evidence, completion summaries like
@@ -1734,6 +1736,13 @@ function shouldBlockAssistantToolClaim(text, { hasToolEvidence = false, hasToolC
     // that would otherwise end a turn without actually calling the tool.
     if (hasToolEvidence && !assistantTextLooksLikeFutureToolPromise(text)) return false;
     return true;
+}
+
+function assistantTextLooksLikeHonestNoEvidenceBlocker(text) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (!value) return false;
+    return /(?:没有|无|尚未|还没|未).{0,16}(?:实际|真实).{0,20}(?:搜索|检索|查看|读取|执行|运行|工具|结果|证据)/i.test(value)
+        || /(?:shell|命令|exec_command).{0,24}(?:网络|联网|访问外网).{0,24}(?:失败|不可用|不通)/i.test(value);
 }
 
 function blockedToolClaimMessageFor(text, context = {}) {
@@ -1748,6 +1757,23 @@ function fakeToolClaimRelayPromptFor(text, context = {}) {
         return webToolUnavailableRelayPrompt();
     }
     return fakeToolClaimRelayPrompt();
+}
+
+function emptyAssistantRelayPrompt() {
+    return [
+        "DeepCodex 已拦截空回复：上一轮模型没有返回消息，也没有返回 tool call。",
+        "",
+        "这不是最终回答。请继续当前任务：如果需要读文件、运行命令、安装依赖、启动服务、生成文件、移动文件或搜索网页，必须现在调用可用工具。",
+        "如果已经没有可做动作，请用自然语言给出明确结论，不能空完成。",
+    ].join("\n");
+}
+
+function emptyAssistantBlockedMessage() {
+    return [
+        "DeepCodex 已拦截空回复：模型没有返回任何可显示内容，也没有发起 tool call。",
+        "实际状态：本轮没有完成新的读取、执行、修改或总结。",
+        "请继续时重新发送明确任务，或让模型基于已有结果给出结论。",
+    ].join("\n");
 }
 
 function guardAssistantToolClaims(output, originalRequest = null) {
@@ -1863,6 +1889,7 @@ async function callUpstreamWithInternalTools(body) {
     const working = { ...body, stream: false, messages: [...(body.messages || [])] };
     const executedInternalCalls = new Set();
     let fakeToolClaimReplays = 0;
+    let emptyAssistantReplays = 0;
 
     const toolLoopReasonText = (reason) => {
         if (reason === "repeated_internal_tool_call") return "模型重复请求了同一个内部工具";
@@ -1934,6 +1961,14 @@ async function callUpstreamWithInternalTools(body) {
             const assistantText = extractAssistantText(json);
             const hasToolEvidence = messagesHaveToolEvidence(working.messages);
             const hasWebToolEvidence = messagesHaveToolOutputFor(working.messages, ["web_search", "web_fetch"]);
+            if (!hasExternalCalls && !String(assistantText || "").trim()) {
+                if (emptyAssistantReplays < 1) {
+                    emptyAssistantReplays += 1;
+                    working.messages.push({ role: "user", content: emptyAssistantRelayPrompt() });
+                    continue;
+                }
+                return { ok: true, status: 200, json: makeTextCompletion(working.model, emptyAssistantBlockedMessage()) };
+            }
             const shouldRelayFakeClaim = shouldBlockAssistantToolClaim(assistantText, {
                 hasToolEvidence,
                 hasWebToolEvidence,

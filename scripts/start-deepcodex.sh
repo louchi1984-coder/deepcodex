@@ -15,7 +15,7 @@ DEEP_CODEX_ENV_FILE="${DEEP_CODEX_ENV_FILE:-$DEEPCODEX_STATE_ROOT/.deepcodex.env
 SETUP_LAST_LOG="${DEEP_CODEX_SETUP_LAST_LOG:-$DEEPCODEX_STATE_ROOT/.deepcodex-setup-last.log}"
 SETUP_UI_SCRIPT="$ROOT/scripts/deepcodex-setup-ui.mjs"
 SETUP_UI_BIN="${DEEPCODEX_SETUP_UI_BIN:-$ROOT/scripts/DeepCodexSetup}"
-DEEPCODEX_APP_BUNDLE="${DEEPCODEX_APP_BUNDLE:-/Applications/deepcodex.app}"
+DEEPCODEX_APP_BUNDLE="${DEEPCODEX_APP_BUNDLE:-$(cd "$ROOT/../../.." && pwd)}"
 PROVIDER_PROFILE_PATH="${DEEPCODEX_PROVIDER_PROFILE:-$CODEX_HOME_DIR/provider-profile.json}"
 GLOBAL_CODEX_HOME="${GLOBAL_CODEX_HOME:-$HOME/.codex}"
 SHARED_CONFIG_SYNC="$ROOT/scripts/sync-shared-codex-config.mjs"
@@ -370,6 +370,7 @@ watch_pid="$(cat "$TRANSLATOR_WATCH_PID_FILE" 2>/dev/null || true)"
 if [ -z "$watch_pid" ] || ! ps -p "$watch_pid" >/dev/null 2>&1; then
   nohup env \
     DEEPCODEX_STATE_ROOT="$DEEPCODEX_STATE_ROOT" \
+    DEEPCODEX_WATCH_GRACE_SECONDS="${DEEPCODEX_WATCH_GRACE_SECONDS:-90}" \
     TRANSLATOR_URL="$TRANSLATOR_URL" \
     TRANSLATOR_LOG="$TRANSLATOR_LOG" \
     TRANSLATOR_PID_FILE="$TRANSLATOR_PID_FILE" \

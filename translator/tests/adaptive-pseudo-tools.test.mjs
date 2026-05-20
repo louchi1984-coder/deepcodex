@@ -299,6 +299,19 @@ test("chat response blocks fake tool execution claims without tool calls", () =>
   assert.match(formatted.output[0].content[0].text, /没有实际 tool call/);
 });
 
+test("chat response blocks Chinese fake search-result narration without tool calls", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "搜到了几个不错的 Remotion 案例，我刚才看了官方 showcase 和 GitHub 示例仓库。" },
+    }],
+  }, { model: "gpt-5.5", input: [] });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
 test("chat response blocks direct command promises without tool calls", () => {
   const formatted = chatToResponsesFormat({
     choices: [{
@@ -459,6 +472,44 @@ test("chat response blocks English dangling update promise with numbered lead-in
   assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
 });
 
+test("chat response blocks English dangling line-number lookup promise", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "Now let me also get the exact line numbers for CONTEXT.md sections and the SidePanel consumption section:" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_read", name: "exec_command", arguments: "{\"cmd\":\"sed -n '305,340p' ThreadTimeline.jsx\"}" },
+      { type: "function_call_output", call_id: "call_read", output: "<span className=\\\"turn-result-summary\\\">" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
+test("chat response blocks English dangling see/follow promise after tool evidence", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "The projection functions are called at line 1620 area. Let me see what function wraps those calls and where THAT function is called:" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_rg", name: "exec_command", arguments: "{\"cmd\":\"rg -n projectTurnTimeline runtime/codex/projections.mjs\"}" },
+      { type: "function_call_output", call_id: "call_rg", output: "runtime/codex/projections.mjs:1620: const result = computeTurnResult(items, turn.status)" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.match(formatted.output[0].content[0].text, /已拦截这轮回复/);
+});
+
 test("chat response blocks status-probe detour after results are ready", () => {
   const formatted = chatToResponsesFormat({
     choices: [{
@@ -546,6 +597,25 @@ test("chat response allows web_search unavailable claim after matching web_searc
   assert.equal(formatted.output.length, 1);
   assert.equal(formatted.output[0].type, "message");
   assert.equal(formatted.output[0].content[0].text, "web_search 返回失败，当前没有可靠搜索结果。");
+});
+
+test("chat response allows honest shell-network failure without inventing web_search", () => {
+  const formatted = chatToResponsesFormat({
+    choices: [{
+      finish_reason: "stop",
+      message: { role: "assistant", content: "我现在没有实际搜索结果，shell 网络访问失败。" },
+    }],
+  }, {
+    model: "gpt-5.5",
+    input: [
+      { type: "function_call", call_id: "call_exec", name: "exec_command", arguments: "{\"cmd\":\"curl https://example.com\"}" },
+      { type: "function_call_output", call_id: "call_exec", output: "Could not resolve host" },
+    ],
+  });
+
+  assert.equal(formatted.output.length, 1);
+  assert.equal(formatted.output[0].type, "message");
+  assert.equal(formatted.output[0].content[0].text, "我现在没有实际搜索结果，shell 网络访问失败。");
 });
 
 test("chat custom tool calls become completed Responses custom_tool_call items", () => {
