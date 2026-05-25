@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 process.env.NODE_ENV = "test";
 
@@ -1797,25 +1800,92 @@ test("responsesToChatBody is deterministic when restored tool calls lack ids", (
   }
 });
 
-test("local backend plugin noise routes return empty local responses", () => {
-  assert.deepEqual(localBackendApiResponse("GET", "/backend-api/plugins/featured"), {
-    items: [],
-    data: [],
-    plugins: [],
-  });
-  assert.deepEqual(localBackendApiResponse("GET", "/backend-api/ps/plugins/installed"), {
-    items: [],
-    data: [],
-    plugins: [],
-    installed: [],
-  });
-  assert.deepEqual(localBackendApiResponse("GET", "/backend-api/connectors/directory/list"), {
-    items: [],
-    data: [],
-    connectors: [],
-  });
+test("local backend projection returns stable empty shapes without caches", () => {
+  const previousSharedHome = process.env.DEEPCODEX_SHARED_CODEX_HOME;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepcodex-empty-projection-"));
+  process.env.DEEPCODEX_SHARED_CODEX_HOME = tmp;
+  try {
+    const plugins = localBackendApiResponse("GET", "/backend-api/plugins/featured");
+    assert.deepEqual(plugins.featuredPluginIds, []);
+    assert.deepEqual(plugins.marketplaceLoadErrors, []);
+    assert.deepEqual(plugins.marketplaces, []);
+    assert.deepEqual(plugins.plugins, []);
+
+    const installed = localBackendApiResponse("GET", "/backend-api/ps/plugins/installed");
+    assert.deepEqual(installed.installed, []);
+
+    const directory = localBackendApiResponse("GET", "/backend-api/connectors/directory/list");
+    assert.equal(directory.schema_version, 1);
+    assert.deepEqual(directory.connectors, []);
+  } finally {
+    if (previousSharedHome === undefined) delete process.env.DEEPCODEX_SHARED_CODEX_HOME;
+    else process.env.DEEPCODEX_SHARED_CODEX_HOME = previousSharedHome;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
   assert.deepEqual(localBackendApiResponse("POST", "/backend-api/codex/analytics-events/events"), {
     ok: true,
   });
   assert.equal(localBackendApiResponse("GET", "/backend-api/unknown"), null);
+});
+
+test("local backend projection reads Codex connector and plugin caches", () => {
+  const previousSharedHome = process.env.DEEPCODEX_SHARED_CODEX_HOME;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepcodex-projection-"));
+  process.env.DEEPCODEX_SHARED_CODEX_HOME = tmp;
+  try {
+    const appDirectory = path.join(tmp, "cache", "codex_app_directory");
+    const appTools = path.join(tmp, "cache", "codex_apps_tools");
+    const pluginDir = path.join(tmp, ".tmp", "plugins", "plugins", "demo", ".codex-plugin");
+    fs.mkdirSync(appDirectory, { recursive: true });
+    fs.mkdirSync(appTools, { recursive: true });
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(appDirectory, "directory.json"), JSON.stringify({
+      schema_version: 1,
+      connectors: [{
+        id: "connector_demo",
+        name: "Demo Connector",
+        description: "Local connector",
+        isAccessible: true,
+        isEnabled: true,
+        pluginDisplayNames: ["Demo"],
+      }],
+    }));
+    fs.writeFileSync(path.join(appTools, "tools.json"), JSON.stringify({
+      schema_version: 2,
+      tools: [{
+        server_name: "codex_apps",
+        tool_namespace: "mcp__codex_apps__demo",
+        tool_name: "demo.read",
+        connector_id: "connector_demo",
+      }],
+    }));
+    fs.writeFileSync(path.join(pluginDir, "plugin.json"), JSON.stringify({
+      name: "demo",
+      version: "1.0.0",
+      description: "Demo plugin",
+      interface: { displayName: "Demo", shortDescription: "Demo plugin" },
+    }));
+
+    const directory = localBackendApiResponse("GET", "/backend-api/connectors/directory/list");
+    assert.equal(directory.connectors.length, 1);
+    assert.equal(directory.connectors[0].id, "connector_demo");
+    assert.deepEqual(directory.items, directory.connectors);
+
+    const detail = localBackendApiResponse("GET", "/backend-api/aip/connectors/connector_demo");
+    assert.equal(detail.name, "Demo Connector");
+    assert.deepEqual(detail.supported_auth, [{ type: "UNSUPPORTED" }]);
+
+    const wham = localBackendApiResponse("POST", "/backend-api/wham/apps");
+    assert.equal(wham.apps.length, 1);
+    assert.equal(wham.tools.length, 1);
+
+    const plugins = localBackendApiResponse("GET", "/backend-api/plugins/list");
+    assert.equal(plugins.plugins.length, 1);
+    assert.equal(plugins.plugins[0].plugin.id, "demo");
+    assert.equal(plugins.plugins[0].plugin.installed, true);
+  } finally {
+    if (previousSharedHome === undefined) delete process.env.DEEPCODEX_SHARED_CODEX_HOME;
+    else process.env.DEEPCODEX_SHARED_CODEX_HOME = previousSharedHome;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

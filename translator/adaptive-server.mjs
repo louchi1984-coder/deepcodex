@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { probeCapabilities } from "./probe.mjs";
 import { toolsToInject, executeInternalTool, isInternalTool, getToolChoiceForRole } from "./tools/registry.mjs";
 import { buildChatToolsWithRouting } from "./compat-rules.mjs";
+import { localBackendApiResponse } from "./local-projection/index.mjs";
 
 // ──────────────────────────────────────────────────── config ─────────────────
 
@@ -134,25 +135,6 @@ function deepcodexUser() {
 function jsonResponse(res, status, body) {
     res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*" });
     res.end(JSON.stringify(body));
-}
-
-function localBackendApiResponse(method, pathname) {
-    if (method === "POST" && pathname === "/backend-api/codex/analytics-events/events") {
-        return { ok: true };
-    }
-    if (method === "POST" && pathname === "/backend-api/wham/apps") {
-        return { apps: [] };
-    }
-    if (method === "GET" && (pathname === "/backend-api/plugins/featured" || pathname === "/backend-api/plugins/list")) {
-        return { items: [], data: [], plugins: [] };
-    }
-    if (method === "GET" && pathname === "/backend-api/ps/plugins/installed") {
-        return { items: [], data: [], plugins: [], installed: [] };
-    }
-    if (method === "GET" && pathname === "/backend-api/connectors/directory/list") {
-        return { items: [], data: [], connectors: [] };
-    }
-    return null;
 }
 
 // ──────────────────────────────────────────────── model mapping ──────────────
