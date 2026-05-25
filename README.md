@@ -36,8 +36,8 @@
 
 | 平台 | 状态 | 下载 |
 | --- | --- | --- |
-| macOS | 可用 | `deepcodex-macos-2026.05.18.dmg` |
-| Windows | beta / preview | `deepcodex-windows-v0.1.9-preview.zip` |
+| macOS | 可用 | `deepcodex-macos-2026.05.25.dmg` |
+| Windows | beta / preview | `deepcodex-windows-v0.1.12-preview.zip` |
 
 > 已安装旧版的用户建议直接更新。新版重点修复了上下文恢复导致的缓存命中异常、上下文压缩、DSML 伪工具调用、`web_search` / `web_fetch` 回灌、假工具叙述拦截误判、macOS 退出后 translator 进程残留，以及多处 DeepSeek 兼容层问题。
 
@@ -50,14 +50,14 @@ deepcodex 不打包官方 Codex，也不修改官方 Codex app 本体。
 
 ### macOS
 
-1. 下载 `deepcodex-macos-2026.05.18.dmg`
+1. 下载 `deepcodex-macos-2026.05.25.dmg`
 2. 打开 DMG，把 `DeepCodex.app` 拖到 `Applications`
 3. 打开 `DeepCodex`
 4. 输入 DeepSeek API key，连通后自动保存
 
 ### Windows beta
 
-1. 下载 `deepcodex-windows-v0.1.9-preview.zip`
+1. 下载 `deepcodex-windows-v0.1.12-preview.zip`
 2. 解压
 3. 双击 `install-windows.bat`
 4. 从桌面快捷方式或开始菜单打开 `DeepCodex`
@@ -176,7 +176,7 @@ deepcodex app / DeepCodex.exe
 
 推荐使用 GitHub Release 里的 DMG：
 
-1. 下载 `deepcodex-macos-2026.05.18.dmg`
+1. 下载 `deepcodex-macos-2026.05.25.dmg`
 2. 打开 DMG
 3. 把 `DeepCodex.app` 拖到 `Applications`
 4. 从“应用程序”里打开 `DeepCodex`
@@ -199,7 +199,7 @@ deepcodex app / DeepCodex.exe
 
 前置依赖：请先安装官方 **Codex Desktop for Windows**。
 
-下载 `deepcodex-windows-v0.1.9-preview.zip`，解压后双击：
+下载 `deepcodex-windows-v0.1.12-preview.zip`，解压后双击：
 
 ```text
 install-windows.bat
@@ -225,11 +225,7 @@ install-windows.bat
 Windows 发布包不包含官方 Codex，也不包含 `codex-patched-app`。  
 安装时会从用户本机已安装的 Codex Desktop 复制并生成 `codex-patched-app`，大小约 `784 MB`。
 
-Windows zip 校验：
-
-```text
-SHA256: D2A6ECAF1EBF0D042EFB6A1A54BC5D6AB3ECDD90BC5D33A564D7844ACB4ABE98
-```
+Windows zip 的 SHA256 以 GitHub Release 附件信息为准。
 
 ---
 
