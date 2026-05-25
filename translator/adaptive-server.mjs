@@ -80,6 +80,13 @@ function fail(res, status, msg) {
     res.end(JSON.stringify({ error: { message: msg, type: "gateway_error" } }));
 }
 
+function failWithDetails(res, status, failure) {
+    const detail = failure && typeof failure === "object" ? failure : { message: String(failure || `HTTP ${status}`) };
+    const message = detail.message || `HTTP ${status}`;
+    res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*" });
+    res.end(JSON.stringify({ error: { message, type: detail.type || "gateway_error", details: detail } }));
+}
+
 function loadProfileFromFile() {
     if (!PROFILE_PATH || !existsSync(PROFILE_PATH)) return null;
     try {
@@ -122,6 +129,30 @@ function deepcodexUser() {
             is_default: true,
         }],
     };
+}
+
+function jsonResponse(res, status, body) {
+    res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*" });
+    res.end(JSON.stringify(body));
+}
+
+function localBackendApiResponse(method, pathname) {
+    if (method === "POST" && pathname === "/backend-api/codex/analytics-events/events") {
+        return { ok: true };
+    }
+    if (method === "POST" && pathname === "/backend-api/wham/apps") {
+        return { apps: [] };
+    }
+    if (method === "GET" && (pathname === "/backend-api/plugins/featured" || pathname === "/backend-api/plugins/list")) {
+        return { items: [], data: [], plugins: [] };
+    }
+    if (method === "GET" && pathname === "/backend-api/ps/plugins/installed") {
+        return { items: [], data: [], plugins: [], installed: [] };
+    }
+    if (method === "GET" && pathname === "/backend-api/connectors/directory/list") {
+        return { items: [], data: [], connectors: [] };
+    }
+    return null;
 }
 
 // ──────────────────────────────────────────────── model mapping ──────────────
@@ -210,6 +241,13 @@ function buildSystemBlock() {
     lines.push("- Do not end a turn with a future-action promise such as \"now I will read\", \"next I will patch\", \"开始读文件\", \"准备打补丁\", or \"继续处理\" unless you emit the matching tool call in the same response.");
     lines.push("- If the next step is to read, inspect, run, edit, patch, write, or verify, call the appropriate tool now. If you cannot call the tool, say exactly why and do not claim the action is about to happen.");
     lines.push("- After a tool failure, either retry with a valid tool call in the same turn or give a final factual blocker. Do not reply only with a promise to retry later.");
+
+    lines.push("");
+    lines.push("Local file reading efficiency rule:");
+    lines.push("- Do not read large source files or documents in full just to prove you inspected them.");
+    lines.push("- Before reading a potentially large file, use wc, rg, grep, ls, or a targeted symbol search to locate relevant sections.");
+    lines.push("- Prefer bounded reads such as sed -n on specific line ranges. Read the whole file only when it is clearly small or the user explicitly asks for the full file.");
+    lines.push("- If a command output is clipped or too large, narrow the query instead of repeating the full read.");
 
     lines.push("");
     lines.push("Connector / app plugin rule:");
@@ -662,7 +700,8 @@ function responsesToChatBody(parsed, options = {}) {
         const flushD = () => { if (deferred.length > 0) { messages.push(...deferred); deferred.length = 0; } };
         const ensureF = () => { if (pendingTC) { messages.push(pendingTC); pendingIds = new Set((pendingTC.tool_calls || []).map(tc => tc.id).filter(Boolean)); pendingTC = null; } };
 
-        for (const item of inputItems) {
+        for (let itemIndex = 0; itemIndex < inputItems.length; itemIndex++) {
+            const item = inputItems[itemIndex];
             if (item.type === "function_call" || item.type === "custom_tool_call") {
                 if (pendingIds?.size > 0) { flushD(); pendingIds = null; }
                 if (!pendingTC) {
@@ -674,7 +713,7 @@ function responsesToChatBody(parsed, options = {}) {
                 const argumentsText = item.type === "custom_tool_call"
                     ? JSON.stringify({ content: typeof item.input === "string" ? item.input : JSON.stringify(item.input ?? "") })
                     : item.arguments || "{}";
-                pendingTC.tool_calls.push({ id: item.call_id || item.id || `call_${Date.now()}`, type: "function", function: { name: item.name, arguments: argumentsText } });
+                pendingTC.tool_calls.push({ id: item.call_id || item.id || `call_${itemIndex}`, type: "function", function: { name: item.name, arguments: argumentsText } });
             } else {
                 if (item.type === "message") { ensureF(); flushD(); activeReasoning = ""; const rawRole = item.role || "user"; const role = normalizeMessageRole(rawRole); let content; if (typeof item.content === "string") content = item.content; else if (Array.isArray(item.content)) { content = item.content.map(convertBlock).filter(Boolean); if (content.length > 0 && content.every(c => c.type === "text")) content = content.map(c => c.text).join("\n"); } if (rawRole && rawRole !== role) content = `[Previous Codex message had unsupported role "${rawRole}"; preserved as ${role}.]\n${content || ""}`; if (typeof content === "string" && role !== "user" && hasPseudoToolMarkup(content)) content = stripPseudoToolMarkup(content); messages.push({ role, content: content || null }); }
                 else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") { ensureF(); activeReasoning = ""; const callId = item.call_id || item.id || ""; const tc = typeof item.output === "string" ? item.output : JSON.stringify(item.output); messages.push({ role: "tool", tool_call_id: callId, content: tc }); }
@@ -2443,10 +2482,22 @@ async function readRaw(req) {
     for await (const c of req) chunks.push(c);
     let raw = Buffer.concat(chunks);
     const enc = (req.headers["content-encoding"] || "").toLowerCase();
-    if (enc === "zstd") try { raw = zlib.zstdDecompressSync(raw); } catch {}
-    else if (enc === "gzip") raw = zlib.gunzipSync(raw);
-    else if (enc === "deflate") raw = zlib.inflateSync(raw);
-    else if (enc === "br") raw = zlib.brotliDecompressSync(raw);
+    try {
+        if (enc === "zstd") {
+            if (typeof zlib.zstdDecompressSync !== "function") {
+                const error = new Error("This Node.js runtime does not support zstd request decompression. Install Node.js 23+ or use the bundled/recommended runtime.");
+                error.statusCode = 415;
+                throw error;
+            }
+            raw = zlib.zstdDecompressSync(raw);
+        } else if (enc === "gzip") raw = zlib.gunzipSync(raw);
+        else if (enc === "deflate") raw = zlib.inflateSync(raw);
+        else if (enc === "br") raw = zlib.brotliDecompressSync(raw);
+    } catch (error) {
+        if (!error.statusCode) error.statusCode = 400;
+        error.message = `Failed to decode request body (${enc || "identity"}): ${error.message || error}`;
+        throw error;
+    }
     return raw;
 }
 
@@ -2473,14 +2524,35 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && (url.pathname === "/backend-api/me" || url.pathname === "/me")) {
-        res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
-        return res.end(JSON.stringify(deepcodexUser()));
+        return jsonResponse(res, 200, deepcodexUser());
     }
 
-    if (req.method === "GET" && url.pathname === "/v1/models") {
+    const localBackend = localBackendApiResponse(req.method, url.pathname);
+    if (localBackend) {
+        return jsonResponse(res, 200, localBackend);
+    }
+
+    if (req.method === "GET" && (url.pathname === "/models" || url.pathname === "/v1/models")) {
         const models = PROFILE?.models || ["deepseek-v4-pro", "deepseek-v4-flash", "gpt-5.5", "gpt-5.4-mini"];
-        res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
-        return res.end(JSON.stringify({ object: "list", data: models.map(id => ({ id, object: "model", created: 1770000000, owned_by: "codex-adaptive" })) }));
+        return jsonResponse(res, 200, { object: "list", data: models.map(id => ({ id, object: "model", created: 1770000000, owned_by: "codex-adaptive" })) });
+    }
+
+    if (req.method === "POST" && (url.pathname === "/chat/completions" || url.pathname === "/v1/chat/completions")) {
+        try {
+            const raw = await readRaw(req);
+            let parsed;
+            try { parsed = JSON.parse(raw.toString("utf8")); } catch { return fail(res, 400, "Invalid JSON"); }
+            const upstreamResp = await postChatCompletion(parsed, "chat-compat");
+            if (!upstreamResp.res.ok) {
+                const failure = classifyUpstreamFailure(upstreamResp.res.status, upstreamResp.text, upstreamResp.json);
+                console.error(`[adaptive][chat-compat] upstream failure ${JSON.stringify(failure)}`);
+                return failWithDetails(res, upstreamResp.res.status, failure);
+            }
+            res.writeHead(upstreamResp.res.status, { "content-type": "application/json", "access-control-allow-origin": "*" });
+            return res.end(JSON.stringify(upstreamResp.json));
+        } catch (e) {
+            return fail(res, e.statusCode || 500, e.message);
+        }
     }
 
     if (req.method === "POST" && (url.pathname === "/responses/input_tokens" || url.pathname === "/v1/responses/input_tokens")) {
@@ -2493,7 +2565,7 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
             return res.end(JSON.stringify(inputTokensResponse(parsed)));
         } catch (e) {
-            return fail(res, 500, e.message);
+            return fail(res, e.statusCode || 500, e.message);
         }
     }
 
@@ -2534,7 +2606,7 @@ const server = http.createServer(async (req, res) => {
 
             if (compact) {
                 const upstreamResp = await callUpstreamOnce(prepareCompactChatBody(chatBody));
-                if (!upstreamResp.ok) return fail(res, upstreamResp.status, upstreamResp.text ? upstreamResp.text.slice(0, 500) : `Upstream ${upstreamResp.status}`);
+                if (!upstreamResp.ok) return failWithDetails(res, upstreamResp.status, classifyUpstreamFailure(upstreamResp.status, upstreamResp.text, upstreamResp.json));
                 const fmt = chatToCompactResponseFormat(upstreamResp.json, parsed.model || "gpt-5.5", parsed);
                 shouldInjectEndTurn(req, parsed);
                 res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
@@ -2546,16 +2618,17 @@ const server = http.createServer(async (req, res) => {
             }
 
             const upstreamResp = await callUpstreamWithInternalTools(chatBody);
-            if (!upstreamResp.ok) return fail(res, upstreamResp.status, upstreamResp.text ? upstreamResp.text.slice(0, 500) : `Upstream ${upstreamResp.status}`);
+            if (!upstreamResp.ok) return failWithDetails(res, upstreamResp.status, classifyUpstreamFailure(upstreamResp.status, upstreamResp.text, upstreamResp.json));
 
             const fmt = chatToResponsesFormat(upstreamResp.json, parsed, routing);
             if (shouldInjectEndTurn(req, parsed)) fmt.end_turn = false;
 
             pipeSSE(res, fmt);
-        } catch (e) { fail(res, 500, e.message); }
+        } catch (e) { fail(res, e.statusCode || 500, e.message); }
         return;
     }
 
+    console.error(`[adaptive] 404 local route ${req.method} ${url.pathname}`);
     fail(res, 404, `Not found: ${req.method} ${url.pathname}`);
 });
 
@@ -2568,4 +2641,4 @@ if (process.env.NODE_ENV !== "test" && isMainModule()) {
     startup().then(() => server.listen(PORT, HOST, () => console.error(`[adaptive] http://${HOST}:${PORT} → ${UPSTREAM}`)));
 }
 
-export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, usageDiagnostics, classifyUpstreamFailure, MAX_TOOL_LOOPS };
+export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, usageDiagnostics, classifyUpstreamFailure, localBackendApiResponse, MAX_TOOL_LOOPS };

@@ -27,11 +27,44 @@ MODEL_CATALOG_TEMPLATE_PATH="${DEEPCODEX_MODEL_CATALOG_TEMPLATE:-$ROOT/codex-hom
 TRANSLATOR_WATCH_SCRIPT="$ROOT/scripts/deepcodex-translator-watch.sh"
 LOCAL_CODEX_API_KEY="${LOCAL_CODEX_API_KEY:-sk-codex-deepseek-local}"
 DEEPCODEX_DISPLAY_NAME="${DEEPCODEX_DISPLAY_NAME:-娄老师说的对}"
+DEEPCODEX_ROUTE_ENV_UNSET=(
+  OPENAI_API_KEY
+  OPENAI_BASE_URL
+  OPENAI_API_BASE
+  OPENAI_API_HOST
+  OPENAI_API_URL
+  OPENAI_ORG_ID
+  OPENAI_ORGANIZATION
+  OPENAI_PROJECT_ID
+  CHATGPT_BASE_URL
+  CODEX_OPENAI_BASE_URL
+)
+DEEPCODEX_ROUTE_ENV_ARGS=()
+for route_var in "${DEEPCODEX_ROUTE_ENV_UNSET[@]}"; do
+  DEEPCODEX_ROUTE_ENV_ARGS+=("-u" "$route_var")
+done
+unset route_var
+
+deepcodex_no_proxy_value() {
+  local current="${1:-}"
+  local extra="127.0.0.1,localhost,::1"
+  if [ -n "$current" ]; then
+    printf '%s,%s\n' "$current" "$extra"
+  else
+    printf '%s\n' "$extra"
+  fi
+}
 
 find_node_bin() {
+  node_supports_zstd() {
+    "$1" -e 'process.exit(typeof require("node:zlib").zstdDecompressSync === "function" ? 0 : 1)' >/dev/null 2>&1
+  }
+
   if [ -n "${NODE_BIN:-}" ] && [ -x "$NODE_BIN" ]; then
-    printf '%s\n' "$NODE_BIN"
-    return 0
+    if node_supports_zstd "$NODE_BIN"; then
+      printf '%s\n' "$NODE_BIN"
+      return 0
+    fi
   fi
   local candidate
   for candidate in \
@@ -39,14 +72,18 @@ find_node_bin() {
     "/opt/homebrew/bin/node" \
     "/usr/local/bin/node"; do
     if [ -n "$candidate" ] && [ -x "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
+      if node_supports_zstd "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
     fi
   done
   for candidate in "$HOME"/.nvm/versions/node/*/bin/node; do
     if [ -x "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
+      if node_supports_zstd "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
     fi
   done
   return 1
@@ -98,9 +135,9 @@ Codex Desktop was not found. Install Codex Desktop first, or set CODEX_BIN befor
 fi
 
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
-  alert "未找到 Node.js。请安装 Node.js，或在启动 deepcodex 前设置 NODE_BIN。
+  alert "未找到可用的 Node.js。DeepCodex 需要支持 zstd 的 Node.js 运行时。请安装较新的 Node.js，或在启动 deepcodex 前设置 NODE_BIN。
 
-Node.js was not found. Install Node.js or set NODE_BIN before launching deepcodex."
+No compatible Node.js runtime was found. DeepCodex requires Node.js with zstd support. Install a newer Node.js or set NODE_BIN before launching deepcodex."
   exit 1
 fi
 
@@ -513,8 +550,18 @@ if [ -n "$DEEPCODEX_WORKSPACE" ]; then
   mkdir -p "$DEEPCODEX_WORKSPACE"
   trust_workspace "$DEEPCODEX_WORKSPACE"
   echo "  workspace:  $DEEPCODEX_WORKSPACE"
-  exec env CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_BIN" --user-data-dir="$ELECTRON_USER_DATA" "$DEEPCODEX_WORKSPACE"
+  exec env \
+    "${DEEPCODEX_ROUTE_ENV_ARGS[@]}" \
+    NO_PROXY="$(deepcodex_no_proxy_value "${NO_PROXY:-}")" \
+    no_proxy="$(deepcodex_no_proxy_value "${no_proxy:-}")" \
+    CODEX_HOME="$CODEX_HOME_DIR" \
+    "$CODEX_BIN" --user-data-dir="$ELECTRON_USER_DATA" "$DEEPCODEX_WORKSPACE"
 else
   echo "  workspace:  <Codex default>"
-  exec env CODEX_HOME="$CODEX_HOME_DIR" "$CODEX_BIN" --user-data-dir="$ELECTRON_USER_DATA"
+  exec env \
+    "${DEEPCODEX_ROUTE_ENV_ARGS[@]}" \
+    NO_PROXY="$(deepcodex_no_proxy_value "${NO_PROXY:-}")" \
+    no_proxy="$(deepcodex_no_proxy_value "${no_proxy:-}")" \
+    CODEX_HOME="$CODEX_HOME_DIR" \
+    "$CODEX_BIN" --user-data-dir="$ELECTRON_USER_DATA"
 fi

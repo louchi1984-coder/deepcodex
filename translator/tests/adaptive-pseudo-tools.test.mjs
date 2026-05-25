@@ -13,6 +13,7 @@ const {
   classifyUpstreamFailure,
   hasPseudoToolMarkup,
   inputTokensResponse,
+  localBackendApiResponse,
   normalizeCompactSummary,
   parsePseudoToolCalls,
   prepareCompactChatBody,
@@ -1765,4 +1766,56 @@ test("final Responses formatting passes unknown pseudo DSML tools to Codex", () 
   assert.equal(formatted.output[1].type, "function_call");
   assert.equal(formatted.output[1].name, "exec_command");
   assert.deepEqual(JSON.parse(formatted.output[1].arguments), { cmd: "ls" });
+});
+
+test("responsesToChatBody is deterministic when restored tool calls lack ids", () => {
+  const request = {
+    model: "gpt-5.5",
+    input: [
+      { type: "message", role: "user", content: "check files" },
+      { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: "ls" }) },
+    ],
+    tools: [{
+      type: "function",
+      name: "exec_command",
+      parameters: { type: "object", properties: { cmd: { type: "string" } }, required: ["cmd"] },
+    }],
+  };
+
+  const originalNow = Date.now;
+  try {
+    Date.now = () => 111;
+    const first = responsesToChatBody(request);
+    Date.now = () => 999;
+    const second = responsesToChatBody(request);
+
+    assert.deepEqual(first.messages, second.messages);
+    const assistantToolMessage = first.messages.find(message => Array.isArray(message.tool_calls));
+    assert.equal(assistantToolMessage.tool_calls[0].id, "call_1");
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("local backend plugin noise routes return empty local responses", () => {
+  assert.deepEqual(localBackendApiResponse("GET", "/backend-api/plugins/featured"), {
+    items: [],
+    data: [],
+    plugins: [],
+  });
+  assert.deepEqual(localBackendApiResponse("GET", "/backend-api/ps/plugins/installed"), {
+    items: [],
+    data: [],
+    plugins: [],
+    installed: [],
+  });
+  assert.deepEqual(localBackendApiResponse("GET", "/backend-api/connectors/directory/list"), {
+    items: [],
+    data: [],
+    connectors: [],
+  });
+  assert.deepEqual(localBackendApiResponse("POST", "/backend-api/codex/analytics-events/events"), {
+    ok: true,
+  });
+  assert.equal(localBackendApiResponse("GET", "/backend-api/unknown"), null);
 });

@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 /**
+ * DEPRECATED: legacy Codex DeepSeek translator.
+ *
+ * Production DeepCodex starts translator/adaptive-server.mjs via
+ * scripts/start-adaptive-translator.sh. Keep this file only as historical
+ * reference; do not use it for current Codex Desktop builds.
+ *
  * Codex DeepSeek Translator — standalone Responses ↔ Chat protocol bridge.
  *
  * Receives zstd/gzip-compressed OpenAI Responses API requests from Codex,
@@ -454,6 +460,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
+    console.warn("[translator/server.mjs] DEPRECATED: use translator/adaptive-server.mjs for DeepCodex production.");
     console.log(`Translator listening on http://${HOST}:${PORT}`);
     console.log(`Upstream: ${UPSTREAM}`);
 });

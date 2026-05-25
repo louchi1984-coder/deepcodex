@@ -553,6 +553,33 @@ function Sync-GlobalRules {
     }
 }
 
+function Set-DeepCodexRouteIsolation {
+    foreach ($name in @(
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "OPENAI_API_HOST",
+        "OPENAI_API_URL",
+        "OPENAI_ORG_ID",
+        "OPENAI_ORGANIZATION",
+        "OPENAI_PROJECT_ID",
+        "CHATGPT_BASE_URL",
+        "CODEX_OPENAI_BASE_URL"
+    )) {
+        Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+    }
+
+    foreach ($name in @("NO_PROXY", "no_proxy")) {
+        $current = [Environment]::GetEnvironmentVariable($name, "Process")
+        $extra = "127.0.0.1,localhost,::1"
+        if ($current) {
+            [Environment]::SetEnvironmentVariable($name, "$current,$extra", "Process")
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $extra, "Process")
+        }
+    }
+}
+
 $NODE_BIN = Find-NodeBin
 if (-not $NODE_BIN) {
     Show-Alert "Node.js was not found. Install Node.js or set NODE_BIN before launching deepcodex."
@@ -627,6 +654,7 @@ if (-not $UPSTREAM_API_KEY) {
 }
 
 Write-PseudoLoginAuth
+Set-DeepCodexRouteIsolation
 
 $env:UPSTREAM_API_KEY = $UPSTREAM_API_KEY
 $env:UPSTREAM_URL = if ($env:UPSTREAM_URL) { $env:UPSTREAM_URL } else { "https://api.deepseek.com/v1" }
