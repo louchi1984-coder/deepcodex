@@ -39,6 +39,11 @@ function readFileFromAsar(fd, entry, dataOffset) {
   return { buf, offset };
 }
 
+function alignedAsarDataOffset(headerStringSize) {
+  const prefixSize = 16;
+  return prefixSize + headerStringSize + ((4 - ((prefixSize + headerStringSize) % 4)) % 4);
+}
+
 function replacePadded(text, search, replacement) {
   const index = text.indexOf(search);
   if (index < 0) throw new Error(`Pattern not found: ${search.slice(0, 80)}`);
@@ -107,6 +112,10 @@ function patchLocaleInfo(text) {
 }
 
 function patchConfigWriteHandler(text) {
+  if (text.includes("\"get-configuration\":async({key:e})=>({value:this.getConfigurationValue(e)})") &&
+      text.includes("\"set-configuration\":async({key:e,value:t})=>(this.setConfigurationValue(e,t),{success:!0})")) {
+    return text;
+  }
   const replacement = "\"get-configuration\":async({key:e})=>({value:this.globalState.get(e)}),\"write-config-value\":async e=>this.getRequestAppServerClient(e.hostId).sendAppServerRequest(\"config/value/write\",e),\"batch-write-config-value\":async e=>this.getRequestAppServerClient(e.hostId).sendAppServerRequest(\"config/batchWrite\",e),\"set-configuration\":async({key:t,value:n})=>(this.globalState.set(t,n),t===e.Or.APPEARANCE_THEME&&VT(n),(t===e.Or.APPEARANCE_THEME||t===e.Or.APPEARANCE_LIGHT_CHROME_THEME||t===e.Or.APPEARANCE_DARK_CHROME_THEME)&&this.windowManager.refreshWindowBackdropForHost(this.hostConfig.id),{success:!0}),\"apply-patch\":async n=>{let r=n.hostConfig,i=this.getAppServerClientForHostIdOrThrow(r.id);return t.zt(n,this.gitManager,i,re(t.Hr(r)))},\"mcp-codex-config\":async({cwd:e})=>({config:await this.buildMcpCodexConfig(e)}),\"worktree-shell-environment-config\":async({cwd:n,hostId:r})=>{let i=this.getRequestAppServerClient(r),a=i.hostConfig;return{shellEnvironment:await t.Lt(e.zt(a)?n:this.mapAgentPathToLocalPath(n,a)??n,i)}},\"ide-context\":async({workspaceRoot:e,origin:t})=>{let n=this.getIpcClientForOrigin(t),r=await n.sendRequest(\"ide-context\",{workspaceRoot:e});return{ideContext:r.result.ideContext}},";
   if (text.includes("\"batch-write-config-value\":async e=>this.getRequestAppServerClient(e.hostId).sendAppServerRequest(\"config/batchWrite\",e)")) return text;
   const currentSearch = "\"get-configuration\":async({key:e})=>({value:this.globalState.get(e)}),\"write-config-value\":async e=>this.getRequestAppServerClient(e.hostId).sendAppServerRequest(\"config/value/write\",e),\"set-configuration\":async({key:t,value:n})=>(this.globalState.set(t,n),t===e.Or.APPEARANCE_THEME&&VT(n),(t===e.Or.APPEARANCE_THEME||t===e.Or.APPEARANCE_LIGHT_CHROME_THEME||t===e.Or.APPEARANCE_DARK_CHROME_THEME)&&this.windowManager.refreshWindowBackdropForHost(this.hostConfig.id),{success:!0}),\"apply-patch\":async n=>{let r=n.hostConfig,i=this.getAppServerClientForHostIdOrThrow(r.id);return t.zt(n,this.gitManager,i,re(t.Hr(r)))},\"mcp-codex-config\":async({cwd:e})=>({config:await this.buildMcpCodexConfig(e)}),\"worktree-shell-environment-config\":async({cwd:n,hostId:r})=>{let i=this.getRequestAppServerClient(r),a=i.hostConfig;return{shellEnvironment:await t.Lt(e.zt(a)?n:this.mapAgentPathToLocalPath(n,a)??n,i)}},\"ide-context\":async({workspaceRoot:e,origin:t})=>{if(!e)throw Error(\"workspaceRoot required\");if(!this.isMultiClientTransport())throw Error(\"IPC\");let n=this.getIpcClientForOrigin(t);if(!n)throw Error(\"Missing IPC client\");let r=await n.sendRequest(\"ide-context\",{workspaceRoot:e});if(r.resultType===\"error\")throw Error(r.error);return{ideContext:r.result.ideContext}},";
@@ -138,21 +147,35 @@ function patchAuthRequirement(text) {
     next = replacePadded(
       next,
       "function T(){return{openAIAuth:null,authMethod:null,requiresAuth:!0,email:null,planAtLogin:null}}",
-      "function T(){return{openAIAuth:null,authMethod:null,requiresAuth:!1,email:null,planAtLogin:null}}",
+      "function T(){return{authMethod:`chatgpt`,requiresAuth:!0,email:null,planAtLogin:0}}",
+    );
+  }
+  if (next.includes("function T(){return{openAIAuth:1,authMethod:1,requiresAuth:!1,email:null,planAtLogin:null}}")) {
+    next = replacePadded(
+      next,
+      "function T(){return{openAIAuth:1,authMethod:1,requiresAuth:!1,email:null,planAtLogin:null}}",
+      "function T(){return{authMethod:`chatgpt`,requiresAuth:!0,email:null,planAtLogin:0}}",
     );
   }
   if (next.includes("requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0)")) {
     next = replacePadded(
       next,
       "requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0)",
-      "requiresAuth:!1",
+      "requiresAuth:!0",
     );
   }
   if (next.includes("requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!1)")) {
     next = replacePadded(
       next,
       "requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!1)",
+      "requiresAuth:!0",
+    );
+  }
+  if (next.includes("requiresAuth:!1                                       ,email:e.account?.type===`chatgpt`?e.account.email:null")) {
+    next = replacePadded(
+      next,
       "requiresAuth:!1",
+      "requiresAuth:!0",
     );
   }
   return next;
@@ -241,6 +264,8 @@ function findConfigWriteHandlerPatch(fd, header, dataOffset) {
     const text = buf.toString("utf8");
     if ((text.includes("\"get-configuration\":async({key:e})=>({value:this.globalState.get(e)})") &&
          text.includes("\"set-configuration\":async({key:t,value:n})")) ||
+        (text.includes("\"get-configuration\":async({key:e})=>({value:this.getConfigurationValue(e)})") &&
+         text.includes("\"set-configuration\":async({key:e,value:t})=>(this.setConfigurationValue(e,t),{success:!0})")) ||
         text.includes("\"write-config-value\":async e=>this.getRequestAppServerClient(e.hostId).writeConfigValue(e)")) {
       return [rel, patchConfigWriteHandler];
     }
@@ -290,11 +315,18 @@ function findAuthRequirementPatch(fd, header, dataOffset) {
     const { buf } = readFileFromAsar(fd, entry, dataOffset);
     const text = buf.toString("utf8");
     if (text.includes("function T(){return{openAIAuth:null,authMethod:null,requiresAuth:!0,email:null,planAtLogin:null}}") ||
+        text.includes("function T(){return{openAIAuth:1,authMethod:1,requiresAuth:!1,email:null,planAtLogin:null}}") ||
+        text.includes("function T(){return{authMethod:`chatgpt`,requiresAuth:!0,email:null,planAtLogin:0}}") ||
         text.includes("requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0)")) {
       return [rel, patchAuthRequirement];
     }
+    if (text.includes("function T(){return{authMethod:`chatgpt`,requiresAuth:!0,email:null,planAtLogin:0}}") &&
+        text.includes("requiresAuth:!0")) {
+      return [rel, (text) => text];
+    }
     if (text.includes("function T(){return{openAIAuth:null,authMethod:null,requiresAuth:!1,email:null,planAtLogin:null}}") &&
-        text.includes("requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!1)")) {
+        (text.includes("requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!1)") ||
+         text.includes("return{openAIAuth:n,authMethod:r,requiresAuth:!1"))) {
       return [rel, (text) => text];
     }
   }
@@ -374,42 +406,57 @@ const headerBuf = Buffer.alloc(headerStringSize);
 fs.readSync(fd, headerBuf, 0, headerStringSize, 16);
 const oldHeaderHash = crypto.createHash("sha256").update(headerBuf).digest("hex");
 const header = JSON.parse(headerBuf.toString("utf8"));
-const dataOffset = 18 + headerStringSize;
+const dataOffset = alignedAsarDataOffset(headerStringSize);
 
-const patches = [
-  ["package.json", patchPackageJson],
-  findBootstrapAppUserModelIdPatch(fd, header, dataOffset),
-  findMainSessionPatch(fd, header, dataOffset),
-  findWindowsClosePatch(fd, header, dataOffset),
-  findLocaleInfoPatch(fd, header, dataOffset),
-  findConfigWriteHandlerPatch(fd, header, dataOffset),
-  findDefaultLocalePatch(fd, header, dataOffset),
-  findEnableI18nPatch(fd, header, dataOffset),
-  findI18nLoadingGatePatch(fd, header, dataOffset),
-  findAuthRequirementPatch(fd, header, dataOffset),
-  findOnboardingGatePatch(fd, header, dataOffset),
-  findAppRouteGatePatch(fd, header, dataOffset),
-  findAppearanceSettingsPatch(fd, header, dataOffset),
-  findGeneralAppearanceSettingsPatch(fd, header, dataOffset),
+const patchSpecs = [
+  ["package-json", () => ["package.json", patchPackageJson]],
+  ["app-user-model-id", () => findBootstrapAppUserModelIdPatch(fd, header, dataOffset)],
+  ["session-title", () => findMainSessionPatch(fd, header, dataOffset)],
+  ["windows-close", () => findWindowsClosePatch(fd, header, dataOffset)],
+  ["locale-info", () => findLocaleInfoPatch(fd, header, dataOffset)],
+  ["config-write", () => findConfigWriteHandlerPatch(fd, header, dataOffset)],
+  ["default-locale", () => findDefaultLocalePatch(fd, header, dataOffset)],
+  ["enable-i18n", () => findEnableI18nPatch(fd, header, dataOffset)],
+  ["i18n-loading-gate", () => findI18nLoadingGatePatch(fd, header, dataOffset)],
+  ["auth-requirement", () => findAuthRequirementPatch(fd, header, dataOffset)],
+  ["onboarding-gate", () => findOnboardingGatePatch(fd, header, dataOffset)],
+  ["app-route-gate", () => findAppRouteGatePatch(fd, header, dataOffset)],
+  ["appearance-settings", () => findAppearanceSettingsPatch(fd, header, dataOffset)],
+  ["general-appearance-settings", () => findGeneralAppearanceSettingsPatch(fd, header, dataOffset)],
 ];
 
 const written = [];
-for (const [rel, patch] of patches) {
-  const entry = walkToEntry(header, rel);
-  const { buf, offset } = readFileFromAsar(fd, entry, dataOffset);
-  const before = buf.toString("utf8");
-  const after = patch(before);
-  const afterBuf = Buffer.from(after, "utf8");
-  if (afterBuf.length !== buf.length) {
-    throw new Error(`${rel} size changed: ${afterBuf.length} !== ${buf.length}`);
+const skipped = [];
+const criticalPatchNames = new Set([
+  "locale-info",
+  "config-write",
+  "default-locale",
+  "enable-i18n",
+  "auth-requirement",
+  "appearance-settings",
+  "general-appearance-settings",
+]);
+for (const [name, findPatch] of patchSpecs) {
+  try {
+    const [rel, patch] = findPatch();
+    const entry = walkToEntry(header, rel);
+    const { buf, offset } = readFileFromAsar(fd, entry, dataOffset);
+    const before = buf.toString("utf8");
+    const after = patch(before);
+    const afterBuf = Buffer.from(after, "utf8");
+    if (afterBuf.length !== buf.length) {
+      throw new Error(`${rel} size changed: ${afterBuf.length} !== ${buf.length}`);
+    }
+    fs.writeSync(fd, afterBuf, 0, afterBuf.length, offset);
+    const hash = crypto.createHash("sha256").update(afterBuf).digest("hex");
+    if (entry.integrity) {
+      entry.integrity.hash = hash;
+      entry.integrity.blocks = [hash];
+    }
+    written.push({ name, rel, size: afterBuf.length });
+  } catch (error) {
+    skipped.push({ name, error: error?.message || String(error) });
   }
-  fs.writeSync(fd, afterBuf, 0, afterBuf.length, offset);
-  const hash = crypto.createHash("sha256").update(afterBuf).digest("hex");
-  if (entry.integrity) {
-    entry.integrity.hash = hash;
-    entry.integrity.blocks = [hash];
-  }
-  written.push({ rel, size: afterBuf.length });
 }
 
 let nextHeaderText = JSON.stringify(header);
@@ -439,4 +486,8 @@ if (oldHeaderHash !== newHeaderHash && exePath && fs.existsSync(exePath) && !exe
   throw new Error(`ASAR header hash changed, but the old hash was not found in ${exePath}`);
 }
 
-console.log(JSON.stringify({ asarPath, written, oldHeaderHash, newHeaderHash, exePatched }, null, 2));
+const criticalSkipped = skipped.filter((item) => criticalPatchNames.has(item.name));
+console.log(JSON.stringify({ asarPath, written, skipped, criticalSkipped, oldHeaderHash, newHeaderHash, exePatched }, null, 2));
+if (criticalSkipped.length > 0) {
+  process.exitCode = 1;
+}

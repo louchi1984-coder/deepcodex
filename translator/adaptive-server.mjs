@@ -2620,7 +2620,10 @@ function isMainModule() {
 }
 
 if (process.env.NODE_ENV !== "test" && isMainModule()) {
-    startup().then(() => server.listen(PORT, HOST, () => console.error(`[adaptive] http://${HOST}:${PORT} → ${UPSTREAM}`)));
+    server.listen(PORT, HOST, () => {
+        console.error(`[adaptive] http://${HOST}:${PORT} → ${UPSTREAM}`);
+        startup();
+    });
 }
 
 export { buildSystemBlock, hasPseudoToolMarkup, stripPseudoToolMarkup, sanitizeMarkdownUrlFormatting, parsePseudoToolCalls, responsesToChatBody, callUpstreamWithInternalTools, ChatToResponsesStreamMapper, chatToResponsesFormat, chatToCompactResponseFormat, prepareCompactChatBody, normalizeCompactSummary, canUseNativeStreaming, inputTokensResponse, unknownInputItemText, usageDiagnostics, classifyUpstreamFailure, localBackendApiResponse, MAX_TOOL_LOOPS };

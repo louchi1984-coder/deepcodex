@@ -19,6 +19,12 @@ function Find-NodeBin {
     if ($found) { return $found.Source }
     $codexNode = Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin\node.exe"
     if (Test-Path -LiteralPath $codexNode) { return $codexNode }
+    $codexBinRoot = Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin"
+    if (Test-Path -LiteralPath $codexBinRoot) {
+        $candidate = Get-ChildItem -LiteralPath $codexBinRoot -Recurse -Filter node.exe -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+    }
     return $null
 }
 
@@ -64,19 +70,104 @@ function Find-CSharpCompiler {
 
 function Test-InstallTargetInUse {
     param([string]$InstallRoot)
-    if (-not (Test-Path -LiteralPath $InstallRoot)) { return $false }
+    return @(Get-BlockingInstallTargetProcesses -InstallRoot $InstallRoot).Count -gt 0
+}
+
+function Test-IsDeepCodexTranslatorProcess {
+    param($Process, [string]$InstallRoot)
+    if (-not $Process) { return $false }
+    if ($Process.Name -ne "node.exe" -and $Process.Name -ne "deepcodex-translator.exe") { return $false }
+    $commandLine = if ($Process.CommandLine) { [string]$Process.CommandLine } else { "" }
+    $exePath = if ($Process.ExecutablePath) { [string]$Process.ExecutablePath } else { "" }
+    if ($commandLine -like "*adaptive-server.mjs*" -and $commandLine -like "*$InstallRoot*") { return $true }
+    if ($Process.Name -eq "deepcodex-translator.exe" -and $exePath -like "$InstallRoot*") { return $true }
+    return $false
+}
+
+function Stop-StaleDeepCodexTranslator {
+    param([string]$InstallRoot)
+    try {
+        Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object { Test-IsDeepCodexTranslatorProcess $_ $InstallRoot } |
+            ForEach-Object {
+                Write-Host "Stopping stale DeepCodex translator pid=$($_.ProcessId)"
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+    } catch {}
+}
+
+function Get-LoopbackPortOwnerProcesses {
+    param([int]$Port)
+    $pids = @()
+    try {
+        $pids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+    } catch {
+        try {
+            $lines = @(netstat -ano -p tcp | Select-String -Pattern (":$Port\s"))
+            foreach ($line in $lines) {
+                $parts = ($line.ToString().Trim() -split "\\s+")
+                if ($parts.Count -ge 5 -and $parts[3] -eq "LISTENING") { $pids += [int]$parts[4] }
+            }
+            $pids = @($pids | Select-Object -Unique)
+        } catch {
+            $pids = @()
+        }
+    }
+    foreach ($ownerPid in $pids) {
+        try {
+            Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction Stop
+        } catch {}
+    }
+}
+
+function Stop-DeepCodexTranslatorOnPort {
+    param([int]$Port, [string]$InstallRoot)
+    foreach ($proc in @(Get-LoopbackPortOwnerProcesses $Port)) {
+        if (Test-IsDeepCodexTranslatorProcess $proc $InstallRoot) {
+            Write-Host "Stopping stale DeepCodex translator on port $Port pid=$($proc.ProcessId)"
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-InstallTargetProcesses {
+    param([string]$InstallRoot)
+    if (-not (Test-Path -LiteralPath $InstallRoot)) { return @() }
     $resolved = (Resolve-Path -LiteralPath $InstallRoot).Path
     $escaped = [WildcardPattern]::Escape($resolved)
     try {
-        $matches = Get-CimInstance Win32_Process -ErrorAction Stop |
+        Get-CimInstance Win32_Process -ErrorAction Stop |
             Where-Object {
-                ($_.ExecutablePath -and $_.ExecutablePath -like "$escaped*") -or
-                ($_.CommandLine -and $_.CommandLine -like "*$resolved*")
-            } |
-            Where-Object { [int]$_.ProcessId -ne $PID }
-        return @($matches).Count -gt 0
+                [int]$_.ProcessId -ne $PID -and
+                (
+                    ($_.ExecutablePath -and $_.ExecutablePath -like "$escaped*") -or
+                    ($_.CommandLine -and $_.CommandLine -like "*$resolved*")
+                )
+            }
     } catch {
-        return $false
+        @()
+    }
+}
+
+function Get-BlockingInstallTargetProcesses {
+    param([string]$InstallRoot)
+    Get-InstallTargetProcesses -InstallRoot $InstallRoot |
+        Where-Object { -not (Test-IsDeepCodexTranslatorProcess $_ $InstallRoot) }
+}
+
+function Stop-InstallTargetProcesses {
+    param([string]$InstallRoot)
+    $processes = @(Get-BlockingInstallTargetProcesses -InstallRoot $InstallRoot)
+    foreach ($proc in $processes) {
+        try {
+            Write-Host "Stopping running DeepCodex process pid=$($proc.ProcessId) name=$($proc.Name)"
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+
+    if ($processes.Count -gt 0) {
+        Start-Sleep -Milliseconds 800
     }
 }
 
@@ -84,11 +175,13 @@ function Copy-CodexAppForPatch {
     param([string]$CodexBin, [string]$InstallRoot)
     $sourceAppRoot = Split-Path -Parent $CodexBin
     $targetAppRoot = Join-Path $InstallRoot "codex-patched-app"
+    $patchOkMarker = Join-Path $InstallRoot "codex-patched-app.ok"
     if (-not (Test-Path -LiteralPath (Join-Path $sourceAppRoot "resources\app.asar"))) {
         Write-Warning "Codex app.asar was not found under $sourceAppRoot; DeepCodex will launch the original Codex host."
         return $null
     }
 
+    Remove-Item -LiteralPath $patchOkMarker -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $targetAppRoot) {
         Remove-Item -LiteralPath $targetAppRoot -Recurse -Force
     }
@@ -107,11 +200,11 @@ function Copy-CodexAppForPatch {
             $brandExitCode = $LASTEXITCODE
             $ErrorActionPreference = $previousErrorActionPreference
             if ($brandExitCode -ne 0) {
-                Write-Warning "Could not patch Codex branding in app.asar. See $brandLog"
+                Write-Warning "Could not patch Codex branding in app.asar. See $brandLog. Keeping the local Codex host copy."
             }
         } catch {
             if ($previousErrorActionPreference) { $ErrorActionPreference = $previousErrorActionPreference }
-            Write-Warning "Could not patch Codex branding in app.asar: $($_.Exception.Message)"
+            Write-Warning "Could not patch Codex branding in app.asar: $($_.Exception.Message). Keeping the local Codex host copy."
         }
     }
 
@@ -127,6 +220,7 @@ function Copy-CodexAppForPatch {
             Write-Warning "Could not patch Codex.exe icon resource: $($_.Exception.Message)"
         }
     }
+    "ok" | Set-Content -LiteralPath $patchOkMarker -Encoding ASCII -NoNewline
     return $targetAppRoot
 }
 
@@ -152,16 +246,31 @@ $runtimeDir = Join-Path $InstallTarget "runtime"
 New-Item -ItemType Directory -Path $InstallTarget -Force | Out-Null
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 
+Stop-InstallTargetProcesses -InstallRoot $InstallTarget
+
 if (Test-InstallTargetInUse -InstallRoot $InstallTarget) {
-    throw "DeepCodex is currently running from $InstallTarget. Close DeepCodex first, then run install-windows.bat again."
+    throw "DeepCodex is still running from $InstallTarget. Close DeepCodex first, then run install-windows.bat again."
 }
 
-foreach ($dir in @("scripts", "translator", "assets", "codex-home-deepseek-app")) {
+Stop-StaleDeepCodexTranslator -InstallRoot $InstallTarget
+Stop-DeepCodexTranslatorOnPort -Port 8282 -InstallRoot $InstallTarget
+
+foreach ($dir in @("scripts", "translator", "assets")) {
     $src = Join-Path $ROOT $dir
     $dst = Join-Path $runtimeDir $dir
     if (Test-Path -LiteralPath $src) {
         New-Item -ItemType Directory -Path $dst -Force | Out-Null
         Copy-Item -Path (Join-Path $src "*") -Destination $dst -Recurse -Force
+    }
+}
+
+$codexHomeSrc = Join-Path $ROOT "codex-home-deepseek-app"
+$codexHomeDst = Join-Path $runtimeDir "codex-home-deepseek-app"
+New-Item -ItemType Directory -Path $codexHomeDst -Force | Out-Null
+foreach ($file in @("config.adaptive-oneapi.toml", "deepseek-model-catalog.json")) {
+    $src = Join-Path $codexHomeSrc $file
+    if (Test-Path -LiteralPath $src) {
+        Copy-Item -LiteralPath $src -Destination (Join-Path $codexHomeDst $file) -Force
     }
 }
 

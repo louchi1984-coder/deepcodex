@@ -36,6 +36,17 @@ $MODEL_CATALOG_TEMPLATE_PATH = if ($env:DEEPCODEX_MODEL_CATALOG_TEMPLATE) { $env
 $DEEPCODEX_DISPLAY_NAME = if ($env:DEEPCODEX_DISPLAY_NAME) { $env:DEEPCODEX_DISPLAY_NAME } else { -join ([char[]](64, 23044, 32769, 24072, 35828, 30340, 23545)) }
 $LOCAL_CODEX_API_KEY = if ($env:LOCAL_CODEX_API_KEY) { $env:LOCAL_CODEX_API_KEY } else { "sk-codex-deepseek-local" }
 $TRANSLATOR_PROC = $null
+$DEEPCODEX_START_MUTEX = $null
+$DEEPCODEX_START_MUTEX_HELD = $false
+
+try {
+    $mutexName = "Local\DeepCodexStart_" + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ROOT)) -replace "[^A-Za-z0-9]", "")
+    $DEEPCODEX_START_MUTEX = New-Object System.Threading.Mutex($true, $mutexName, [ref]$DEEPCODEX_START_MUTEX_HELD)
+    if (-not $DEEPCODEX_START_MUTEX_HELD) {
+        Write-Host "DeepCodex is already starting or running."
+        exit 0
+    }
+} catch {}
 
 function Show-Alert {
     param([string]$Message)
@@ -51,6 +62,12 @@ function Find-NodeBin {
     if ($env:NODE_BIN -and (Test-Path -LiteralPath $env:NODE_BIN)) { return $env:NODE_BIN }
     $found = Get-Command "node.exe" -ErrorAction SilentlyContinue
     if ($found) { return $found.Source }
+    $codexBinRoot = Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin"
+    if (Test-Path -LiteralPath $codexBinRoot) {
+        $candidate = Get-ChildItem -LiteralPath $codexBinRoot -Recurse -Filter node.exe -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+    }
     $nvmRoot = Join-Path $env:APPDATA "nvm"
     if (Test-Path -LiteralPath $nvmRoot) {
         $candidate = Get-ChildItem -LiteralPath $nvmRoot -Recurse -Filter node.exe -ErrorAction SilentlyContinue |
@@ -119,13 +136,20 @@ exit /b %ERRORLEVEL%
 }
 
 function Find-CodexBin {
-    if ($env:CODEX_BIN -and (Test-Path -LiteralPath $env:CODEX_BIN)) { return $env:CODEX_BIN }
-    $patchedCodex = Join-Path (Split-Path -Parent $ROOT) "codex-patched-app\Codex.exe"
-    if (Test-Path -LiteralPath $patchedCodex) { return $patchedCodex }
+    function Test-IsWindowsAppsPath {
+        param([string]$Path)
+        if (-not $Path) { return $false }
+        return ($Path -like "*\WindowsApps\*")
+    }
+    if ($env:CODEX_BIN -and (Test-Path -LiteralPath $env:CODEX_BIN) -and -not (Test-IsWindowsAppsPath $env:CODEX_BIN)) { return $env:CODEX_BIN }
+    $installRoot = Split-Path -Parent $ROOT
+    $patchedCodex = Join-Path $installRoot "codex-patched-app\Codex.exe"
+    $patchOkMarker = Join-Path $installRoot "codex-patched-app.ok"
+    if ((Test-Path -LiteralPath $patchedCodex) -and (Test-Path -LiteralPath $patchOkMarker)) { return $patchedCodex }
     $binTxt = Join-Path (Split-Path -Parent $ROOT) "codex-bin.txt"
     if (Test-Path -LiteralPath $binTxt) {
         $saved = (Get-Content -LiteralPath $binTxt -Raw).Trim()
-        if ($saved -and (Test-Path -LiteralPath $saved)) { return $saved }
+        if ($saved -and (Test-Path -LiteralPath $saved) -and -not (Test-IsWindowsAppsPath $saved)) { return $saved }
     }
     foreach ($name in @("OpenAI.Codex", "OpenAI.Codex_8wekyb3d8bbwe")) {
         try {
@@ -133,7 +157,7 @@ function Find-CodexBin {
             if ($pkg) {
                 foreach ($rel in @("app\Codex.exe", "Codex.exe")) {
                     $candidate = Join-Path $pkg.InstallLocation $rel
-                    if (Test-Path -LiteralPath $candidate) { return $candidate }
+                    if ((Test-Path -LiteralPath $candidate) -and -not (Test-IsWindowsAppsPath $candidate)) { return $candidate }
                 }
             }
         } catch {}
@@ -146,9 +170,9 @@ function Find-CodexBin {
         if (Test-Path -LiteralPath $candidate) { return $candidate }
     }
     $found = Get-Command "Codex.exe" -ErrorAction SilentlyContinue
-    if ($found) { return $found.Source }
+    if ($found -and -not (Test-IsWindowsAppsPath $found.Source)) { return $found.Source }
     $found = Get-Command "codex.exe" -ErrorAction SilentlyContinue
-    if ($found) { return $found.Source }
+    if ($found -and -not (Test-IsWindowsAppsPath $found.Source)) { return $found.Source }
     return $null
 }
 
@@ -334,21 +358,70 @@ function Get-DeepCodexTranslatorProcesses {
     try {
         Get-CimInstance Win32_Process -ErrorAction Stop |
             Where-Object {
-                ($_.Name -eq "node.exe" -or $_.Name -eq "deepcodex-translator.exe") -and
-                $_.CommandLine -and
-                $_.CommandLine -like "*adaptive-server.mjs*" -and
-                ($_.CommandLine -like "*$ROOT*" -or $_.CommandLine -like "*$installRoot*")
+                Test-IsDeepCodexTranslatorProcess $_ $installRoot
             }
     } catch {
         @()
     }
 }
 
+function Test-IsDeepCodexTranslatorProcess {
+    param($Process, [string]$InstallRoot)
+    if (-not $Process) { return $false }
+    if ($Process.Name -ne "node.exe" -and $Process.Name -ne "deepcodex-translator.exe") { return $false }
+    $commandLine = if ($Process.CommandLine) { [string]$Process.CommandLine } else { "" }
+    $exePath = if ($Process.ExecutablePath) { [string]$Process.ExecutablePath } else { "" }
+    if ($commandLine -like "*adaptive-server.mjs*" -and ($commandLine -like "*$ROOT*" -or $commandLine -like "*$InstallRoot*")) { return $true }
+    if ($Process.Name -eq "deepcodex-translator.exe" -and $exePath -like "$InstallRoot*") { return $true }
+    return $false
+}
+
 function Stop-StaleDeepCodexTranslator {
     foreach ($proc in @(Get-DeepCodexTranslatorProcesses)) {
         try {
+            Write-TranslatorStartLog "stopping stale translator pid=$($proc.ProcessId)"
             Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
         } catch {}
+    }
+}
+
+function Get-LoopbackPortOwnerProcesses {
+    param([int]$Port)
+    $pids = @()
+    try {
+        $pids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+    } catch {
+        try {
+            $lines = @(netstat -ano -p tcp | Select-String -Pattern (":$Port\s"))
+            foreach ($line in $lines) {
+                $parts = ($line.ToString().Trim() -split "\\s+")
+                if ($parts.Count -ge 5 -and $parts[3] -eq "LISTENING") { $pids += [int]$parts[4] }
+            }
+            $pids = @($pids | Select-Object -Unique)
+        } catch {
+            $pids = @()
+        }
+    }
+    foreach ($ownerPid in $pids) {
+        try {
+            Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction Stop
+        } catch {}
+    }
+}
+
+function Stop-DeepCodexTranslatorOnPort {
+    param([int]$Port)
+    $installRoot = Split-Path -Parent $ROOT
+    foreach ($proc in @(Get-LoopbackPortOwnerProcesses $Port)) {
+        if (Test-IsDeepCodexTranslatorProcess $proc $installRoot) {
+            try {
+                Write-TranslatorStartLog "stopping stale translator on port $Port pid=$($proc.ProcessId)"
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+            } catch {}
+        } else {
+            Write-TranslatorStartLog "port $Port is occupied by pid=$($proc.ProcessId) name=$($proc.Name); leaving it alone"
+        }
     }
 }
 
@@ -660,7 +733,11 @@ $env:UPSTREAM_API_KEY = $UPSTREAM_API_KEY
 $env:UPSTREAM_URL = if ($env:UPSTREAM_URL) { $env:UPSTREAM_URL } else { "https://api.deepseek.com/v1" }
 $env:TRANSLATOR_PROFILE_PATH = $PROVIDER_PROFILE_PATH
 $env:TRANSLATOR_HOST = "127.0.0.1"
+Stop-StaleDeepCodexTranslator
+Stop-DeepCodexTranslatorOnPort 8282
+Start-Sleep -Milliseconds 200
 $TRANSLATOR_PORT = if ($env:TRANSLATOR_PORT) { [int]$env:TRANSLATOR_PORT } else { Select-LoopbackPort 8282 }
+if ($env:TRANSLATOR_PORT) { Stop-DeepCodexTranslatorOnPort $TRANSLATOR_PORT }
 $TRANSLATOR_URL = if ($env:TRANSLATOR_URL) { $env:TRANSLATOR_URL } else { "http://127.0.0.1:$TRANSLATOR_PORT" }
 $env:TRANSLATOR_PORT = "$TRANSLATOR_PORT"
 $env:CODEX_ELECTRON_USER_DATA_PATH = $ELECTRON_USER_DATA
@@ -668,20 +745,29 @@ $env:DEEP_CODEX_ENV_FILE = $DEEP_CODEX_ENV_FILE
 $DEEPCODEX_CDP_PORT = Select-LoopbackPort $DEEPCODEX_CDP_PORT
 
 if (-not (Test-TranslatorHealth)) {
-    Stop-StaleDeepCodexTranslator
     "" | Set-Content -LiteralPath $TRANSLATOR_LOG -Encoding utf8
     "" | Set-Content -LiteralPath $TRANSLATOR_ERR_LOG -Encoding utf8
     $TRANSLATOR_PROC = Start-TranslatorProcess $TRANSLATOR_NODE_BIN
     Start-Sleep -Milliseconds 700
     if (-not (Test-TranslatorHealth) -and ($TRANSLATOR_NODE_BIN -ne $NODE_BIN)) {
-        Write-TranslatorStartLog "dedicated translator not healthy; falling back to $NODE_BIN"
-        $TRANSLATOR_PROC = Start-TranslatorProcess $NODE_BIN
+        if ($TRANSLATOR_PROC -and -not $TRANSLATOR_PROC.HasExited) {
+            Write-TranslatorStartLog "dedicated translator still starting; waiting for health"
+        } else {
+            Write-TranslatorStartLog "dedicated translator exited before health; falling back to $NODE_BIN"
+            $TRANSLATOR_PROC = Start-TranslatorProcess $NODE_BIN
+        }
     }
 }
 
 $ready = $false
+$fallbackTried = $false
 for ($i = 0; $i -lt 45; $i++) {
     if (Test-TranslatorHealth) { $ready = $true; break }
+    if ((-not $fallbackTried) -and ($TRANSLATOR_NODE_BIN -ne $NODE_BIN) -and $TRANSLATOR_PROC -and $TRANSLATOR_PROC.HasExited) {
+        $fallbackTried = $true
+        Write-TranslatorStartLog "dedicated translator exited while waiting; falling back to $NODE_BIN"
+        $TRANSLATOR_PROC = Start-TranslatorProcess $NODE_BIN
+    }
     Start-Sleep -Seconds 1
 }
 if (-not $ready) {
@@ -816,5 +902,11 @@ try {
     }
     Stop-StaleDeepCodexTranslator
     Stop-DeepCodexOwnedProcesses -KeepProcessIds @($PID, $launcherPid)
+    if ($DEEPCODEX_START_MUTEX_HELD -and $DEEPCODEX_START_MUTEX) {
+        try { $DEEPCODEX_START_MUTEX.ReleaseMutex() } catch {}
+    }
+    if ($DEEPCODEX_START_MUTEX) {
+        try { $DEEPCODEX_START_MUTEX.Dispose() } catch {}
+    }
 }
 
