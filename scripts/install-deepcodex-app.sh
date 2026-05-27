@@ -61,7 +61,7 @@ if [ -z "$CODEX_BIN" ] || [ ! -x "$CODEX_BIN" ]; then
   exit 1
 fi
 
-clang -Wall -Wextra -O2 "$LAUNCHER_SRC" -o "$SOURCE_APP/Contents/MacOS/CodexDeepSeekLauncher"
+clang -Wall -Wextra -O2 -mmacosx-version-min=12.0 -arch arm64 -arch x86_64 "$LAUNCHER_SRC" -o "$SOURCE_APP/Contents/MacOS/CodexDeepSeekLauncher"
 cp "$SOURCE_APP/Contents/MacOS/CodexDeepSeekLauncher" "$SOURCE_APP/Contents/MacOS/DeepCodexLauncher"
 
 rm -rf "$RUNTIME_DIR"
