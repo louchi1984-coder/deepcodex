@@ -220,6 +220,7 @@ function buildSystemBlock() {
     lines.push("- If no suitable tool is available or the tool fails, say plainly that you do not have actual search results in this turn and ask for a URL or permission/input as needed.");
     lines.push("- Do not invent URLs, repositories, examples, or source claims from memory when the user asked to search.");
     lines.push("- Never convert shell, curl, npm, browser, or exec_command network failures into \"web_search unavailable\" unless web_search itself was actually called and failed.");
+    lines.push("- Do not claim you switched to a different execution/authentication mode (token, browser, SSH, API key, local bridge, etc.) unless the actual tool command, arguments, or output shows that mode was used. If you only intend to switch modes, say it as a plan and then call the matching tool.");
     lines.push("- Do not end a turn with a future-action promise such as \"now I will read\", \"next I will patch\", \"开始读文件\", \"准备打补丁\", or \"继续处理\" unless you emit the matching tool call in the same response.");
     lines.push("- If the next step is to read, inspect, run, edit, patch, write, or verify, call the appropriate tool now. If you cannot call the tool, say exactly why and do not claim the action is about to happen.");
     lines.push("- After a tool failure, either retry with a valid tool call in the same turn or give a final factual blocker. Do not reply only with a promise to retry later.");
