@@ -237,7 +237,7 @@ function localBackendApiResponse(method, pathname) {
     if (method === "GET" && (pathname === "/backend-api/plugins/featured" || pathname === "/backend-api/plugins/list")) {
         return pluginsPayload();
     }
-    if (method === "GET" && pathname === "/backend-api/ps/plugins/installed") {
+    if (method === "GET" && (pathname === "/backend-api/ps/plugins/installed" || pathname === "/backend-api/ps/plugins/list")) {
         return pluginsPayload();
     }
     if (method === "GET" && pathname === "/backend-api/connectors/directory/list") {

@@ -8,7 +8,7 @@ if (!sourcePath || !targetPath) {
   process.exit(2);
 }
 
-const sharedSectionRe = /^\[(marketplaces|plugins|mcp_servers)\./;
+const sharedSectionRe = /^\[(features|marketplaces|plugins|mcp_servers|projects)(\.|\])/;
 const windowsShimCommands = new Set(["npx", "npm", "pnpm", "yarn"]);
 const shouldNormalizeWindowsShims = process.platform === "win32" || process.env.DEEPCODEX_FORCE_WINDOWS_SHIM === "1";
 

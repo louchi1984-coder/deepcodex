@@ -1815,6 +1815,8 @@ test("local backend projection returns stable empty shapes without caches", () =
 
     const installed = localBackendApiResponse("GET", "/backend-api/ps/plugins/installed");
     assert.deepEqual(installed.installed, []);
+    const psList = localBackendApiResponse("GET", "/backend-api/ps/plugins/list");
+    assert.deepEqual(psList.plugins, []);
 
     const directory = localBackendApiResponse("GET", "/backend-api/connectors/directory/list");
     assert.equal(directory.schema_version, 1);

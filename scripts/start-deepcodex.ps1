@@ -342,7 +342,7 @@ function Test-WindowHandleExists {
     param([IntPtr]$Handle)
     if ($Handle -eq [IntPtr]::Zero) { return $true }
     if (-not (Initialize-WindowProbe)) { return $true }
-    return [DeepCodexWindowProbe]::IsWindow($Handle)
+    return ([DeepCodexWindowProbe]::IsWindow($Handle) -and [DeepCodexWindowProbe]::IsWindowVisible($Handle))
 }
 
 function Stop-SetupWindow {
@@ -617,6 +617,130 @@ if (!text.includes(header)) {
 '@ | Out-Null
 }
 
+function Ensure-DeepCodexCoreConfig {
+    Invoke-NodeStdin -Arguments @((Join-Path $CODEX_HOME_DIR "config.toml"), (Join-Path $CODEX_HOME_DIR "deepseek-model-catalog.json"), $TRANSLATOR_URL) -Script @'
+const fs = require("fs");
+const [configPath, catalogPath, translatorUrl] = process.argv.slice(2);
+let text = "";
+try { text = fs.readFileSync(configPath, "utf8").replace(/^\uFEFF/, ""); } catch {}
+
+function tomlString(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+const defaults = new Map([
+  ["model", tomlString("gpt-5.5")],
+  ["model_reasoning_effort", tomlString("high")],
+  ["approval_policy", tomlString("on-request")],
+  ["sandbox_mode", tomlString("workspace-write")],
+]);
+const forced = new Map([
+  ["model_catalog_json", tomlString(catalogPath)],
+  ["chatgpt_base_url", tomlString(`${translatorUrl}/backend-api/`)],
+  ["openai_base_url", tomlString(translatorUrl)],
+]);
+
+for (const key of forced.keys()) {
+  text = text.replace(new RegExp(`^${key}\\s*=.*\\r?\\n?`, "m"), "");
+}
+
+const existingTopLevel = (key) => new RegExp(`^${key}\\s*=`, "m").test(text);
+const lines = text.split(/\r?\n/);
+let insertAt = lines.findIndex((line) => /^\[[^\]]+\]\s*$/.test(line));
+if (insertAt < 0) insertAt = lines.length;
+while (insertAt > 0 && lines[insertAt - 1].trim() === "") insertAt -= 1;
+const prefix = [
+  ...[...defaults.entries()].filter(([key]) => !existingTopLevel(key)),
+  ...forced.entries(),
+].map(([key, value]) => `${key} = ${value}`);
+lines.splice(insertAt, 0, ...prefix, "");
+text = lines.join("\n").replace(/\n+$/g, "");
+const windowsBlockMatch = text.match(/(^\[windows\]\s*$)([\s\S]*?)(?=^\[[^\]]+\]\s*$|\s*$)/m);
+if (windowsBlockMatch) {
+  const [block, header, body] = windowsBlockMatch;
+  if (!/^sandbox\s*=/m.test(body)) {
+    text = text.replace(block, `${header}\nsandbox = "unelevated"${body}`);
+  }
+} else {
+  text = `${text}\n\n[windows]\nsandbox = "unelevated"`;
+}
+fs.writeFileSync(configPath, `${text.replace(/\n+$/g, "")}\n`, "utf8");
+'@ | Out-Null
+}
+
+function Ensure-GlobalPermissionDefaults {
+    Invoke-NodeStdin -Arguments @((Join-Path $GLOBAL_CODEX_HOME "config.toml")) -Script @'
+const fs = require("fs");
+const [configPath] = process.argv.slice(2);
+let text = "";
+try { text = fs.readFileSync(configPath, "utf8").replace(/^\uFEFF/, ""); } catch {}
+
+const defaults = new Map([
+  ["approval_policy", '"on-request"'],
+  ["sandbox_mode", '"workspace-write"'],
+]);
+
+const missing = [...defaults.entries()].filter(([key]) => !new RegExp(`^${key}\\s*=`, "m").test(text));
+if (!missing.length) process.exit(0);
+
+const lines = text.split(/\r?\n/);
+let insertAt = lines.findIndex((line) => /^\[[^\]]+\]\s*$/.test(line));
+if (insertAt < 0) insertAt = lines.length;
+while (insertAt > 0 && lines[insertAt - 1].trim() === "") insertAt -= 1;
+lines.splice(insertAt, 0, ...missing.map(([key, value]) => `${key} = ${value}`), "");
+fs.mkdirSync(require("node:path").dirname(configPath), { recursive: true });
+fs.writeFileSync(configPath, `${lines.join("\n").replace(/\n+$/g, "")}\n`, "utf8");
+'@ | Out-Null
+}
+
+function Ensure-DeepCodexUiStateDefaults {
+    Invoke-NodeStdin -Arguments @((Join-Path $CODEX_HOME_DIR ".codex-global-state.json")) -Script @'
+const fs = require("fs");
+const [statePath] = process.argv.slice(2);
+let state = {};
+try { state = JSON.parse(fs.readFileSync(statePath, "utf8")); } catch {}
+state["electron-persisted-atom-state"] ||= {};
+const atom = state["electron-persisted-atom-state"];
+atom["composer-permission-mode-visibility"] ||= {
+  "guardian-approvals": true,
+  "full-access": true,
+};
+if (atom["skip-full-access-confirm"] === undefined) {
+  atom["skip-full-access-confirm"] = true;
+}
+atom["agent-mode-by-host-id"] ||= {};
+if (!atom["agent-mode-by-host-id"].local || atom["agent-mode-by-host-id"].local === "read-only") {
+  atom["agent-mode-by-host-id"].local = "auto";
+}
+atom["heartbeat-thread-permissions-by-id"] ||= {};
+const permissions = atom["heartbeat-thread-permissions-by-id"];
+const projectlessThreadIds = Array.isArray(state["projectless-thread-ids"])
+  ? state["projectless-thread-ids"]
+  : [];
+const rootHints = state["thread-workspace-root-hints"] && typeof state["thread-workspace-root-hints"] === "object"
+  ? state["thread-workspace-root-hints"]
+  : {};
+const permissionThreadIds = new Set([...projectlessThreadIds, ...Object.keys(rootHints)]);
+for (const threadId of permissionThreadIds) {
+  if (permissions[threadId]) continue;
+  const hintedRoot = typeof rootHints[threadId] === "string" ? rootHints[threadId] : null;
+  const writableRoots = hintedRoot ? [hintedRoot] : [];
+  permissions[threadId] = {
+    approvalPolicy: "on-request",
+    approvalsReviewer: "user",
+    sandboxPolicy: {
+      type: "workspaceWrite",
+      writableRoots,
+      excludeSlashTmp: false,
+      excludeTmpdirEnvVar: false,
+      networkAccess: false,
+    },
+  };
+}
+fs.writeFileSync(statePath, JSON.stringify(state), "utf8");
+'@ | Out-Null
+}
+
 function Sync-GlobalRules {
     $source = Join-Path $GLOBAL_CODEX_HOME "rules"
     $target = Join-Path $CODEX_HOME_DIR "rules"
@@ -827,6 +951,9 @@ if (blockRe.test(text)) {
   fs.writeFileSync(configPath, text);
 }
 '@ | Out-Null
+Ensure-DeepCodexCoreConfig
+Ensure-GlobalPermissionDefaults
+Ensure-DeepCodexUiStateDefaults
 Sync-GlobalRules
 
 $env:CODEX_HOME = $CODEX_HOME_DIR
@@ -872,6 +999,13 @@ while ($mainWindowHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $windowP
 }
 if ($mainWindowHandle -ne [IntPtr]::Zero) {
     Write-Host "  Main window: $mainWindowHandle"
+} else {
+    Write-Host "DeepCodex main window did not appear; stopping background processes."
+    try { Stop-Process -Id $codexProc.Id -Force -ErrorAction SilentlyContinue } catch {}
+    if ($TRANSLATOR_PROC -and -not $TRANSLATOR_PROC.HasExited) { try { $TRANSLATOR_PROC.Kill() } catch {} }
+    Stop-DeepCodexOwnedProcesses -KeepProcessIds @($PID)
+    Alert "DeepCodex started but no window appeared. Please launch DeepCodex from the desktop shortcut or Start Menu, not from a remote SSH session."
+    exit 1
 }
 $clearedKeyAfterLogout = $false
 $launcherPid = $PID
