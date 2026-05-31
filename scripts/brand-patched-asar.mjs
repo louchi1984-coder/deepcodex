@@ -198,11 +198,9 @@ function patchAppRouteGate(text) {
 }
 
 function patchAppearanceSettings(text) {
-  const childListRe = /children:\[\(0,([A-Za-z_$][\w$]*)\.jsx\)\(([A-Za-z_$][\w$]*),\{\}\),\(0,\1\.jsx\)\(([A-Za-z_$][\w$]*),\{\}\)\]/;
-  const match = childListRe.exec(text);
-  if (!match) return text;
-  const replacement = `children:(0,${match[1]}.jsx)(${match[2]},{})`;
-  return text.slice(0, match.index) + replacement + " ".repeat(match[0].length - replacement.length) + text.slice(match.index + match[0].length);
+  if (text.includes("children:[(0,V.jsx)(R,{}),(0,V.jsx)(Q,{})]")) return text;
+  const replacement = "function ee(){let e=(0,B.c)(1),t;return e[0]===Symbol.for(`react.memo_cache_sentinel`)?(t=(0,V.jsxs)(D,{title:(0,V.jsx)(T,{slug:`appearance`}),children:[(0,V.jsx)(R,{}),(0,V.jsx)(Q,{})]}),e[0]=t):t=e[0],t}";
+  return replaceBetweenPadded(text, "function ee(){", "export{ee as AppearanceSettings};", replacement);
 }
 
 function patchGeneralAppearanceSettings(text) {
