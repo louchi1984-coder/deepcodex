@@ -40,9 +40,9 @@ Latest release:
 | Platform | Status | Download |
 | --- | --- | --- |
 | macOS | Available | `deepcodex-macos-2026.05.31.dmg` |
-| Windows | beta / preview | `deepcodex-windows-v0.1.28-state-fix.zip` |
+| Windows | beta / preview | `deepcodex-windows-v0.1.30-appearance-settings-fix.zip` |
 
-Users on older builds are encouraged to update. The current build includes fixes for restored-context cache misses, context compaction, DSML pseudo tool calls, `web_search` / `web_fetch` tool result handling, fake tool narration guards, macOS translator process cleanup, Windows ASAR patching, Windows translator startup cleanup, permission / sandbox state initialization, and several DeepSeek compatibility issues.
+Users on older builds are encouraged to update. The current build includes fixes for restored-context cache misses, context compaction, DSML pseudo tool calls, `web_search` / `web_fetch` tool result handling, fake tool narration guards, macOS translator process cleanup, Windows ASAR patching, Windows appearance settings, Windows translator startup cleanup, permission / sandbox state initialization, and several DeepSeek compatibility issues.
 
 ---
 
@@ -61,7 +61,7 @@ deepcodex does not bundle official Codex Desktop and does not modify the officia
 
 ### Windows beta
 
-1. Download `deepcodex-windows-v0.1.28-state-fix.zip`
+1. Download `deepcodex-windows-v0.1.30-appearance-settings-fix.zip`
 2. Unzip it
 3. Double-click `install-windows.bat`
 4. Launch `DeepCodex` from the desktop shortcut or Start Menu

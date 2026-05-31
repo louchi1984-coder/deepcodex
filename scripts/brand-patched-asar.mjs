@@ -105,10 +105,12 @@ function patchWindowsCloseBehavior(text) {
 }
 
 function patchLocaleInfo(text) {
-  const search = "\"locale-info\":async()=>({ideLocale:n.app.getLocale(),systemLocale:n.app.getSystemLocale()})";
+  const localeInfoRe = /"locale-info":async\(\)=>\(\{ideLocale:([A-Za-z_$][\w$]*)\.app\.getLocale\(\),systemLocale:\1\.app\.getSystemLocale\(\)\}\)/;
+  const match = localeInfoRe.exec(text);
   const replacement = "\"locale-info\":async()=>({ideLocale:`zh-CN`,systemLocale:`zh-CN`})";
-  if (!text.includes(search) && text.includes(replacement)) return text;
-  return replacePadded(text, search, replacement);
+  if (!match && text.includes(replacement)) return text;
+  if (!match) throw new Error("locale-info handler pattern not found");
+  return text.slice(0, match.index) + replacement + " ".repeat(match[0].length - replacement.length) + text.slice(match.index + match[0].length);
 }
 
 function patchConfigWriteHandler(text) {
@@ -196,9 +198,11 @@ function patchAppRouteGate(text) {
 }
 
 function patchAppearanceSettings(text) {
-  const replacement = "function ee(){let e=(0,B.c)(1),t;return e[0]===Symbol.for(`react.memo_cache_sentinel`)?(t=(0,V.jsx)(P,{title:(0,V.jsx)(A,{slug:`appearance`}),children:(0,V.jsx)(R,{})}),e[0]=t):t=e[0],t}";
-  if (text.includes(replacement)) return text;
-  return replaceBetweenPadded(text, "function ee(){", "export{ee as AppearanceSettings}", replacement);
+  const childListRe = /children:\[\(0,([A-Za-z_$][\w$]*)\.jsx\)\(([A-Za-z_$][\w$]*),\{\}\),\(0,\1\.jsx\)\(([A-Za-z_$][\w$]*),\{\}\)\]/;
+  const match = childListRe.exec(text);
+  if (!match) return text;
+  const replacement = `children:(0,${match[1]}.jsx)(${match[2]},{})`;
+  return text.slice(0, match.index) + replacement + " ".repeat(match[0].length - replacement.length) + text.slice(match.index + match[0].length);
 }
 
 function patchGeneralAppearanceSettings(text) {
@@ -249,7 +253,7 @@ function findLocaleInfoPatch(fd, header, dataOffset) {
     if (!rel.startsWith(".vite/build/") || !rel.endsWith(".js")) continue;
     const { buf } = readFileFromAsar(fd, entry, dataOffset);
     const text = buf.toString("utf8");
-    if (text.includes("\"locale-info\":async()=>({ideLocale:n.app.getLocale(),systemLocale:n.app.getSystemLocale()})") ||
+    if (/"locale-info":async\(\)=>\(\{ideLocale:([A-Za-z_$][\w$]*)\.app\.getLocale\(\),systemLocale:\1\.app\.getSystemLocale\(\)\}\)/.test(text) ||
         text.includes("\"locale-info\":async()=>({ideLocale:`zh-CN`,systemLocale:`zh-CN`})")) {
       return [rel, patchLocaleInfo];
     }
@@ -422,7 +426,6 @@ const patchSpecs = [
   ["onboarding-gate", () => findOnboardingGatePatch(fd, header, dataOffset)],
   ["app-route-gate", () => findAppRouteGatePatch(fd, header, dataOffset)],
   ["appearance-settings", () => findAppearanceSettingsPatch(fd, header, dataOffset)],
-  ["general-appearance-settings", () => findGeneralAppearanceSettingsPatch(fd, header, dataOffset)],
 ];
 
 const written = [];
@@ -434,7 +437,6 @@ const criticalPatchNames = new Set([
   "enable-i18n",
   "auth-requirement",
   "appearance-settings",
-  "general-appearance-settings",
 ]);
 for (const [name, findPatch] of patchSpecs) {
   try {
