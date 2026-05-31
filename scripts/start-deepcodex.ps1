@@ -33,7 +33,8 @@ $DEEPCODEX_CDP_PORT = if ($env:DEEPCODEX_CDP_PORT) { [int]$env:DEEPCODEX_CDP_POR
 $DEEPCODEX_PLUGIN_UNLOCK = if ($env:DEEPCODEX_PLUGIN_UNLOCK) { $env:DEEPCODEX_PLUGIN_UNLOCK } else { "0" }
 $CONFIG_TEMPLATE_PATH = if ($env:DEEPCODEX_CONFIG_TEMPLATE) { $env:DEEPCODEX_CONFIG_TEMPLATE } else { Join-Path $ROOT "codex-home-deepseek-app\config.adaptive-oneapi.toml" }
 $MODEL_CATALOG_TEMPLATE_PATH = if ($env:DEEPCODEX_MODEL_CATALOG_TEMPLATE) { $env:DEEPCODEX_MODEL_CATALOG_TEMPLATE } else { Join-Path $ROOT "codex-home-deepseek-app\deepseek-model-catalog.json" }
-$DEEPCODEX_DISPLAY_NAME = if ($env:DEEPCODEX_DISPLAY_NAME) { $env:DEEPCODEX_DISPLAY_NAME } else { -join ([char[]](64, 23044, 32769, 24072, 35828, 30340, 23545)) }
+$DEEPCODEX_DISPLAY_NAME = if ($env:DEEPCODEX_DISPLAY_NAME) { $env:DEEPCODEX_DISPLAY_NAME } else { -join ([char[]](23044, 32769, 24072, 35828, 30340, 23545)) }
+$DEEPCODEX_ACCOUNT_EMAIL = if ($env:DEEPCODEX_ACCOUNT_EMAIL) { $env:DEEPCODEX_ACCOUNT_EMAIL } else { "deepcodex@local" }
 $LOCAL_CODEX_API_KEY = if ($env:LOCAL_CODEX_API_KEY) { $env:LOCAL_CODEX_API_KEY } else { "sk-codex-deepseek-local" }
 $TRANSLATOR_PROC = $null
 $DEEPCODEX_START_MUTEX = $null
@@ -537,20 +538,20 @@ function Invoke-NodeStdin {
 function Write-PseudoLoginAuth {
     New-Item -ItemType Directory -Path $CODEX_HOME_DIR -Force | Out-Null
     $authPath = Join-Path $CODEX_HOME_DIR "auth.json"
-    Invoke-NodeStdin -Arguments @($authPath, $DEEPCODEX_DISPLAY_NAME) -Script @'
+    Invoke-NodeStdin -Arguments @($authPath, $DEEPCODEX_DISPLAY_NAME, $DEEPCODEX_ACCOUNT_EMAIL) -Script @'
 const fs = require("fs");
-const [authPath, displayName] = process.argv.slice(2);
+const [authPath, displayName, accountEmail] = process.argv.slice(2);
 const b64url = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fakeJwt = (payload) => `${b64url({ alg: "none", typ: "JWT" })}.${b64url(payload)}.deepcodex`;
 const now = Math.floor(Date.now() / 1000);
 const accountId = "deepcodex-local-account";
 const userId = "deepcodex-local-user";
-const profile = { email: displayName, email_verified: true, name: displayName };
+const profile = { email: accountEmail, email_verified: true, name: displayName };
 fs.writeFileSync(authPath, JSON.stringify({
   auth_mode: "chatgpt",
   OPENAI_API_KEY: null,
   tokens: {
-    id_token: fakeJwt({ iss: "https://auth.openai.com", aud: ["app_deepcodex_local"], sub: userId, iat: now, exp: now + 365 * 24 * 60 * 60, email: displayName, email_verified: true, name: displayName, "https://api.openai.com/auth": { user_id: userId, chatgpt_user_id: userId, chatgpt_account_id: accountId, chatgpt_account_user_id: `${userId}__${accountId}`, chatgpt_plan_type: "prolite", localhost: true, groups: [], organizations: [] } }),
+    id_token: fakeJwt({ iss: "https://auth.openai.com", aud: ["app_deepcodex_local"], sub: userId, iat: now, exp: now + 365 * 24 * 60 * 60, email: accountEmail, email_verified: true, name: displayName, "https://api.openai.com/auth": { user_id: userId, chatgpt_user_id: userId, chatgpt_account_id: accountId, chatgpt_account_user_id: `${userId}__${accountId}`, chatgpt_plan_type: "prolite", localhost: true, groups: [], organizations: [] } }),
     access_token: fakeJwt({ iss: "https://auth.openai.com", aud: ["https://api.openai.com/v1"], sub: userId, iat: now, nbf: now, exp: now + 365 * 24 * 60 * 60, scp: ["openid", "profile", "email", "offline_access"], "https://api.openai.com/profile": profile, "https://api.openai.com/auth": { user_id: userId, chatgpt_user_id: userId, chatgpt_account_id: accountId, chatgpt_account_user_id: `${userId}__${accountId}`, chatgpt_plan_type: "prolite", localhost: true } }),
     refresh_token: "rt_deepcodex_local",
     account_id: accountId
@@ -960,6 +961,7 @@ $env:CODEX_HOME = $CODEX_HOME_DIR
 $env:LANG = "zh_CN.UTF-8"
 $env:LC_ALL = "zh_CN.UTF-8"
 $codexArgs = @(
+    "--user-data-dir=$ELECTRON_USER_DATA",
     "--remote-debugging-port=$DEEPCODEX_CDP_PORT",
     "--remote-allow-origins=http://127.0.0.1:$DEEPCODEX_CDP_PORT",
     "--lang=zh-CN"

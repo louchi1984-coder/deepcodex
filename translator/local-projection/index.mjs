@@ -4,6 +4,10 @@ import path from "node:path";
 
 const EMPTY_PNG_BASE64 =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l6w7YwAAAABJRU5ErkJggg==";
+const LOCAL_USER_ID = "deepcodex-local-user";
+const LOCAL_ACCOUNT_ID = "deepcodex-local-account";
+const LOCAL_DISPLAY_NAME = process.env.DEEPCODEX_ACCOUNT_DISPLAY_NAME || "娄老师说的对";
+const LOCAL_EMAIL = process.env.DEEPCODEX_ACCOUNT_EMAIL || "deepcodex@local";
 
 function codexHomes() {
     const homes = [];
@@ -211,6 +215,71 @@ function whamAppsPayload() {
     };
 }
 
+function localUserPayload() {
+    return {
+        object: "user",
+        id: LOCAL_USER_ID,
+        name: LOCAL_DISPLAY_NAME,
+        email: LOCAL_EMAIL,
+        image: null,
+        picture: null,
+        groups: [],
+        accounts: [localAccountPayload()],
+    };
+}
+
+function localAccountPayload() {
+    return {
+        id: LOCAL_ACCOUNT_ID,
+        object: "account",
+        type: "chatgpt",
+        account_id: LOCAL_ACCOUNT_ID,
+        user_id: LOCAL_USER_ID,
+        name: LOCAL_DISPLAY_NAME,
+        email: LOCAL_EMAIL,
+        role: "owner",
+        is_default: true,
+        is_deactivated: false,
+        plan_type: "prolite",
+        account_plan: {
+            type: "prolite",
+            has_paid_subscription: true,
+        },
+    };
+}
+
+function accountsPayload() {
+    const account = localAccountPayload();
+    return {
+        accounts: [account],
+        items: [account],
+        data: [account],
+        default_account_id: LOCAL_ACCOUNT_ID,
+        current_account_id: LOCAL_ACCOUNT_ID,
+    };
+}
+
+function accountCheckPayload() {
+    return {
+        user: localUserPayload(),
+        account: localAccountPayload(),
+        accounts: [localAccountPayload()],
+        default_account_id: LOCAL_ACCOUNT_ID,
+        current_account_id: LOCAL_ACCOUNT_ID,
+        is_authenticated: true,
+        requires_login: false,
+    };
+}
+
+function userSettingsPayload() {
+    return {
+        object: "user_settings",
+        user: localUserPayload(),
+        settings: {},
+        data: {},
+    };
+}
+
 function connectorIdFromPath(pathname, suffix = "") {
     const match = pathname.match(/^\/backend-api\/aip\/connectors\/([^/]+)(?:\/.*)?$/);
     if (!match) return null;
@@ -228,6 +297,21 @@ function connectorLogoPayload() {
 }
 
 function localBackendApiResponse(method, pathname) {
+    if (method === "GET" && (pathname === "/backend-api/me" || pathname === "/me")) {
+        return localUserPayload();
+    }
+    if (method === "GET" && pathname === "/backend-api/accounts/check/v4-2023-04-27") {
+        return accountCheckPayload();
+    }
+    if (method === "GET" && pathname === "/backend-api/settings/user") {
+        return userSettingsPayload();
+    }
+    if (method === "GET" && pathname === "/backend-api/accounts") {
+        return accountsPayload();
+    }
+    if (method === "GET" && pathname === "/backend-api/accounts/current") {
+        return localAccountPayload();
+    }
     if (method === "POST" && pathname === "/backend-api/codex/analytics-events/events") {
         return { ok: true };
     }
@@ -268,8 +352,12 @@ function localBackendApiResponse(method, pathname) {
 }
 
 export {
+    accountCheckPayload,
+    accountsPayload,
     connectorDirectoryPayload,
+    localAccountPayload,
     localBackendApiResponse,
+    localUserPayload,
     pluginsPayload,
     readAppTools,
     readConnectorDirectory,

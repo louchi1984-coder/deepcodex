@@ -211,6 +211,13 @@ function patchGeneralAppearanceSettings(text) {
   return replaceBetweenPadded(text, "function qn(){", "function Jn(){", replacement);
 }
 
+function patchProfileDropdownSettings(text) {
+  const search = ",Mt=xt,Nt=p(Se,`settings`)";
+  const replacement = ",Mt=!0,Nt=p(Se,`settings`)";
+  if (!text.includes(search) && text.includes(replacement)) return text;
+  return replacePadded(text, search, replacement);
+}
+
 function findBootstrapAppUserModelIdPatch(fd, header, dataOffset) {
   for (const [rel, entry] of walkFiles(header)) {
     if (!rel.startsWith(".vite/build/") || !rel.endsWith(".js")) continue;
@@ -401,6 +408,19 @@ function findGeneralAppearanceSettingsPatch(fd, header, dataOffset) {
   throw new Error("Could not find general appearance settings bundle");
 }
 
+function findProfileDropdownSettingsPatch(fd, header, dataOffset) {
+  for (const [rel, entry] of walkFiles(header)) {
+    if (!rel.startsWith("webview/assets/profile-dropdown-") || !rel.endsWith(".js")) continue;
+    const { buf } = readFileFromAsar(fd, entry, dataOffset);
+    const text = buf.toString("utf8");
+    if (text.includes(",Mt=xt,Nt=p(Se,`settings`)") ||
+        text.includes(",Mt=!0,Nt=p(Se,`settings`)")) {
+      return [rel, patchProfileDropdownSettings];
+    }
+  }
+  throw new Error("Could not find profile dropdown settings gate");
+}
+
 
 const fd = fs.openSync(asarPath, "r+");
 const sizeBuf = Buffer.alloc(16);
@@ -426,6 +446,7 @@ const patchSpecs = [
   ["onboarding-gate", () => findOnboardingGatePatch(fd, header, dataOffset)],
   ["app-route-gate", () => findAppRouteGatePatch(fd, header, dataOffset)],
   ["appearance-settings", () => findAppearanceSettingsPatch(fd, header, dataOffset)],
+  ["profile-dropdown-settings", () => findProfileDropdownSettingsPatch(fd, header, dataOffset)],
 ];
 
 const written = [];

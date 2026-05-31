@@ -27,6 +27,7 @@ MODEL_CATALOG_TEMPLATE_PATH="${DEEPCODEX_MODEL_CATALOG_TEMPLATE:-$ROOT/codex-hom
 TRANSLATOR_WATCH_SCRIPT="$ROOT/scripts/deepcodex-translator-watch.sh"
 LOCAL_CODEX_API_KEY="${LOCAL_CODEX_API_KEY:-sk-codex-deepseek-local}"
 DEEPCODEX_DISPLAY_NAME="${DEEPCODEX_DISPLAY_NAME:-娄老师说的对}"
+DEEPCODEX_ACCOUNT_EMAIL="${DEEPCODEX_ACCOUNT_EMAIL:-deepcodex@local}"
 DEEPCODEX_ROUTE_ENV_UNSET=(
   OPENAI_API_KEY
   OPENAI_BASE_URL
@@ -376,16 +377,16 @@ NODE
 
 write_pseudo_login_auth() {
   mkdir -p "$CODEX_HOME_DIR"
-  "$NODE_BIN" - "$CODEX_HOME_DIR/auth.json" "$DEEPCODEX_DISPLAY_NAME" <<'NODE'
+  "$NODE_BIN" - "$CODEX_HOME_DIR/auth.json" "$DEEPCODEX_DISPLAY_NAME" "$DEEPCODEX_ACCOUNT_EMAIL" <<'NODE'
 const fs = require("fs");
-const [authPath, displayName] = process.argv.slice(2);
+const [authPath, displayName, accountEmail] = process.argv.slice(2);
 const b64url = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fakeJwt = (payload) => `${b64url({ alg: "none", typ: "JWT" })}.${b64url(payload)}.deepcodex`;
 const now = Math.floor(Date.now() / 1000);
 const accountId = "deepcodex-local-account";
 const userId = "deepcodex-local-user";
 const profile = {
-  email: displayName,
+  email: accountEmail,
   email_verified: true,
   name: displayName,
 };
@@ -399,7 +400,7 @@ fs.writeFileSync(authPath, JSON.stringify({
       sub: userId,
       iat: now,
       exp: now + 365 * 24 * 60 * 60,
-      email: displayName,
+      email: accountEmail,
       email_verified: true,
       name: displayName,
       "https://api.openai.com/auth": {

@@ -171,6 +171,20 @@ function Stop-InstallTargetProcesses {
     }
 }
 
+function Copy-DirectoryWithRobocopy {
+    param([string]$Source, [string]$Destination)
+    if (-not (Get-Command robocopy.exe -ErrorAction SilentlyContinue)) {
+        Copy-Item -Path (Join-Path $Source "*") -Destination $Destination -Recurse -Force
+        return
+    }
+
+    & robocopy.exe $Source $Destination /E /R:1 /W:1 /NFL /NDL /NP /NJH /NJS | Out-Null
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ge 8) {
+        throw "robocopy failed with exit code $exitCode while copying $Source to $Destination"
+    }
+}
+
 function Copy-CodexAppForPatch {
     param([string]$CodexBin, [string]$InstallRoot)
     $sourceAppRoot = Split-Path -Parent $CodexBin
@@ -186,10 +200,15 @@ function Copy-CodexAppForPatch {
         Remove-Item -LiteralPath $targetAppRoot -Recurse -Force
     }
     New-Item -ItemType Directory -Path $targetAppRoot -Force | Out-Null
-    Copy-Item -Path (Join-Path $sourceAppRoot "*") -Destination $targetAppRoot -Recurse -Force
+    Copy-DirectoryWithRobocopy -Source $sourceAppRoot -Destination $targetAppRoot
 
     $asar = Join-Path $targetAppRoot "resources\app.asar"
     $exe = Join-Path $targetAppRoot "Codex.exe"
+    if (-not ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $asar))) {
+        Remove-Item -LiteralPath $targetAppRoot -Recurse -Force -ErrorAction SilentlyContinue
+        throw "Copied Codex host is incomplete. Missing Codex.exe or resources\app.asar under $targetAppRoot"
+    }
+
     if ((Test-Path -LiteralPath $BRAND_ASAR_SCRIPT) -and (Test-Path -LiteralPath $asar)) {
         $previousErrorActionPreference = $ErrorActionPreference
         try {

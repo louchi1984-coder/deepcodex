@@ -113,25 +113,6 @@ function loadProfileFromFile() {
     }
 }
 
-function deepcodexUser() {
-    return {
-        object: "user",
-        id: "deepcodex-local-user",
-        name: DEEPCODEX_DISPLAY_NAME,
-        email: DEEPCODEX_DISPLAY_NAME,
-        image: null,
-        picture: null,
-        groups: [],
-        accounts: [{
-            id: "deepcodex-local-account",
-            name: DEEPCODEX_DISPLAY_NAME,
-            email: DEEPCODEX_DISPLAY_NAME,
-            role: "owner",
-            is_default: true,
-        }],
-    };
-}
-
 function jsonResponse(res, status, body) {
     res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*" });
     res.end(JSON.stringify(body));
@@ -2504,10 +2485,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/health") {
         res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
         return res.end(JSON.stringify({ ok: true, upstream: UPSTREAM, profile: PROFILE?.provider || "unknown", internalTools: toolsToInject(PROFILE).map(t => t.function.name) }));
-    }
-
-    if (req.method === "GET" && (url.pathname === "/backend-api/me" || url.pathname === "/me")) {
-        return jsonResponse(res, 200, deepcodexUser());
     }
 
     const localBackend = localBackendApiResponse(req.method, url.pathname);

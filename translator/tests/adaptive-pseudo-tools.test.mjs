@@ -1821,6 +1821,30 @@ test("local backend projection returns stable empty shapes without caches", () =
     const directory = localBackendApiResponse("GET", "/backend-api/connectors/directory/list");
     assert.equal(directory.schema_version, 1);
     assert.deepEqual(directory.connectors, []);
+
+    const me = localBackendApiResponse("GET", "/backend-api/me");
+    assert.equal(me.id, "deepcodex-local-user");
+    assert.equal(me.name, "娄老师说的对");
+    assert.equal(me.email, "deepcodex@local");
+    assert.equal(me.accounts[0].id, "deepcodex-local-account");
+    assert.equal(me.accounts[0].name, "娄老师说的对");
+    assert.equal(me.accounts[0].email, "deepcodex@local");
+    assert.equal(me.accounts[0].type, "chatgpt");
+
+    const accountCheck = localBackendApiResponse("GET", "/backend-api/accounts/check/v4-2023-04-27");
+    assert.equal(accountCheck.is_authenticated, true);
+    assert.equal(accountCheck.requires_login, false);
+
+    const accounts = localBackendApiResponse("GET", "/backend-api/accounts");
+    assert.equal(accounts.current_account_id, "deepcodex-local-account");
+    assert.equal(accounts.accounts.length, 1);
+
+    const current = localBackendApiResponse("GET", "/backend-api/accounts/current");
+    assert.equal(current.id, "deepcodex-local-account");
+    assert.equal(current.type, "chatgpt");
+
+    const settings = localBackendApiResponse("GET", "/backend-api/settings/user");
+    assert.equal(settings.object, "user_settings");
   } finally {
     if (previousSharedHome === undefined) delete process.env.DEEPCODEX_SHARED_CODEX_HOME;
     else process.env.DEEPCODEX_SHARED_CODEX_HOME = previousSharedHome;
