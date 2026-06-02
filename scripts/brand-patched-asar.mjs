@@ -84,10 +84,15 @@ function patchPackageJson(text) {
 }
 
 function patchBootstrapAppUserModelId(text) {
-  const search = "process.platform===`win32`&&n.app.setAppUserModelId(t.b(x))";
-  const replacement = "n.app.setAppUserModelId(`DeepCodex`)";
-  if (!text.includes(search) && text.includes(replacement)) return text;
-  return replacePadded(text, search, replacement);
+  if (text.includes("setAppUserModelId(`DeepCodex`)")) return text;
+  // Anchor on the stable structure; minified variable names (n/r) and the arg
+  // expression (t.b(x), n.E(S), ...) change between Codex builds, so capture them.
+  const re = /process\.platform===`win32`&&([\w$]+)\.app\.setAppUserModelId\((?:[^()]|\([^()]*\))*\)/;
+  const m = re.exec(text);
+  if (!m) throw new Error("AppUserModelID bootstrap pattern not found");
+  const replacement = `${m[1]}.app.setAppUserModelId(\`DeepCodex\`)`;
+  if (replacement.length > m[0].length) throw new Error("AppUserModelID replacement longer than match");
+  return text.slice(0, m.index) + replacement + " ".repeat(m[0].length - replacement.length) + text.slice(m.index + m[0].length);
 }
 
 function patchMainSession(text) {
@@ -216,12 +221,19 @@ function patchProfileDropdownSettings(text) {
   return replacePadded(text, search, replacement);
 }
 
+function patchBrowserWindowIcon(text) {
+  const search = "...process.platform===`win32`?{autoHideMenuBar:!0}:{},";
+  const replacement = "...process.platform===`win32`?{icon:`icon.ico`}:{},";
+  if (!text.includes(search) && text.includes("icon:`icon.ico`")) return text;
+  return replacePadded(text, search, replacement);
+}
+
 function findBootstrapAppUserModelIdPatch(fd, header, dataOffset) {
   for (const [rel, entry] of walkFiles(header)) {
     if (!rel.startsWith(".vite/build/") || !rel.endsWith(".js")) continue;
     const { buf } = readFileFromAsar(fd, entry, dataOffset);
     const text = buf.toString("utf8");
-    if (text.includes("setAppUserModelId(t.b(x))") ||
+    if (/process\.platform===`win32`&&[\w$]+\.app\.setAppUserModelId\((?:[^()]|\([^()]*\))*\)/.test(text) ||
         text.includes("setAppUserModelId(`DeepCodex`)")) {
       return [rel, patchBootstrapAppUserModelId];
     }
@@ -419,6 +431,19 @@ function findProfileDropdownSettingsPatch(fd, header, dataOffset) {
   throw new Error("Could not find profile dropdown settings gate");
 }
 
+function findBrowserWindowIconPatch(fd, header, dataOffset) {
+  for (const [rel, entry] of walkFiles(header)) {
+    if (!rel.startsWith(".vite/build/main-") || !rel.endsWith(".js")) continue;
+    const { buf } = readFileFromAsar(fd, entry, dataOffset);
+    const text = buf.toString("utf8");
+    if (text.includes("...process.platform===`win32`?{autoHideMenuBar:!0}:{}") ||
+        text.includes("icon:`icon.ico`")) {
+      return [rel, patchBrowserWindowIcon];
+    }
+  }
+  throw new Error("Could not find BrowserWindow options under .vite/build/main-*.js");
+}
+
 
 const fd = fs.openSync(asarPath, "r+");
 const sizeBuf = Buffer.alloc(16);
@@ -445,6 +470,7 @@ const patchSpecs = [
   ["app-route-gate", () => findAppRouteGatePatch(fd, header, dataOffset)],
   ["appearance-settings", () => findAppearanceSettingsPatch(fd, header, dataOffset)],
   ["profile-dropdown-settings", () => findProfileDropdownSettingsPatch(fd, header, dataOffset)],
+  ["browser-window-icon", () => findBrowserWindowIconPatch(fd, header, dataOffset)],
 ];
 
 const written = [];
@@ -504,7 +530,11 @@ if (exePath && fs.existsSync(exePath) && oldHeaderHash !== newHeaderHash) {
 }
 
 if (oldHeaderHash !== newHeaderHash && exePath && fs.existsSync(exePath) && !exePatched) {
-  throw new Error(`ASAR header hash changed, but the old hash was not found in ${exePath}`);
+  // Newer Codex/Electron builds (e.g. MS Store 26.x) no longer embed the ASAR header
+  // hash as plain ASCII in the EXE, so it cannot be located/replaced. These builds do
+  // not enforce embedded ASAR integrity (a hand-patched asar launches fine), so the EXE
+  // hash patch is optional here: warn and keep the patched asar instead of aborting.
+  console.warn(`ASAR header hash changed, but the old hash was not found in ${exePath}. Skipping EXE hash patch (asar integrity not enforced on this build).`);
 }
 
 const criticalSkipped = skipped.filter((item) => criticalPatchNames.has(item.name));

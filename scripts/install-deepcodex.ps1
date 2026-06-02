@@ -232,6 +232,13 @@ function Copy-CodexAppForPatch {
     if ((Test-Path -LiteralPath $icon) -and (Test-Path -LiteralPath (Split-Path -Parent $resourceIcon))) {
         Copy-Item -LiteralPath $icon -Destination $resourceIcon -Force
     }
+    # The browser-window-icon asar patch sets BrowserWindow icon to the relative path
+    # `icon.ico`, which Electron resolves against the process working dir (the app root
+    # next to Codex.exe). Without a copy here the running window/taskbar icon is not found.
+    $appRootIcon = Join-Path $targetAppRoot "icon.ico"
+    if ((Test-Path -LiteralPath $icon) -and (Test-Path -LiteralPath $targetAppRoot)) {
+        Copy-Item -LiteralPath $icon -Destination $appRootIcon -Force
+    }
     if ((Test-Path -LiteralPath $icon) -and (Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $PATCH_EXE_ICON_SCRIPT)) {
         try {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PATCH_EXE_ICON_SCRIPT -ExePath $exe -IconPath $icon | Out-Null
@@ -239,6 +246,8 @@ function Copy-CodexAppForPatch {
             Write-Warning "Could not patch Codex.exe icon resource: $($_.Exception.Message)"
         }
     }
+    # Refresh the Windows icon cache so the patched taskbar/window icon shows immediately.
+    try { & ie4uinit.exe -show | Out-Null } catch {}
     "ok" | Set-Content -LiteralPath $patchOkMarker -Encoding ASCII -NoNewline
     return $targetAppRoot
 }
