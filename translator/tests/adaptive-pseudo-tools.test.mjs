@@ -1069,7 +1069,7 @@ test("damaged context_compaction repairs restore and drops noisy tool history", 
   assert.match(body.messages.at(-1).content, /继续修复 compact restore/);
 });
 
-test("healthy long restored history is capped by translator item count", () => {
+test("healthy long restored history caps pre-active history while keeping active turn", () => {
   const input = Array.from({ length: 230 }, (_, index) => ({
     type: "message",
     role: index % 2 ? "assistant" : "user",
@@ -1081,8 +1081,8 @@ test("healthy long restored history is capped by translator item count", () => {
     input,
   }, { allowTools: false, injectInternalTools: false });
 
-  assert.equal(body.messages.length, 220);
-  assert.match(body.messages[0].content, /healthy-history-10/);
+  assert.equal(body.messages.length, 222);
+  assert.match(body.messages[0].content, /healthy-history-8/);
   assert.match(body.messages.at(-1).content, /healthy-history-229/);
 });
 
@@ -1104,7 +1104,7 @@ test("healthy long restored history keeps the latest compaction summary before c
 
   assert.match(body.messages[0].content, /压缩摘要/);
   assert.match(body.messages[0].content, /缓存命中/);
-  assert.match(body.messages[1].content, /tail-history-10/);
+  assert.match(body.messages[1].content, /tail-history-8/);
   assert.match(body.messages.at(-1).content, /tail-history-229/);
 });
 
@@ -1155,6 +1155,45 @@ test("restored history keeps active-turn tool transcripts stable for prompt cach
   assert.match(joined, /old-output-19/);
   assert.match(joined, /active-output-0/);
   assert.match(joined, /active-output-19/);
+});
+
+test("restored history keeps active-turn prefix stable after item cap", () => {
+  const oldHistory = Array.from({ length: 260 }, (_, index) => ({
+    type: "message",
+    role: index % 2 ? "assistant" : "user",
+    content: [{ type: "text", text: `old-history-${index}` }],
+  }));
+  const activeStart = [
+    { type: "message", role: "user", content: [{ type: "text", text: "继续当前长任务" }] },
+    ...Array.from({ length: 12 }, (_, index) => ([
+      { type: "function_call", call_id: `active_${index}`, name: "exec_command", arguments: `{"cmd":"echo active-${index}"}` },
+      { type: "function_call_output", call_id: `active_${index}`, output: `active-output-${index}` },
+    ])).flat(),
+  ];
+  const activeContinuation = [
+    ...Array.from({ length: 6 }, (_, index) => ([
+      { type: "function_call", call_id: `active_more_${index}`, name: "exec_command", arguments: `{"cmd":"echo active-more-${index}"}` },
+      { type: "function_call_output", call_id: `active_more_${index}`, output: `active-more-output-${index}` },
+    ])).flat(),
+  ];
+
+  const first = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [...oldHistory, ...activeStart],
+  }, { allowTools: false, injectInternalTools: false });
+  const second = responsesToChatBody({
+    model: "gpt-5.5",
+    input: [...oldHistory, ...activeStart, ...activeContinuation],
+  }, { allowTools: false, injectInternalTools: false });
+
+  const firstText = JSON.stringify(first.messages);
+  const secondText = JSON.stringify(second.messages);
+  let common = 0;
+  while (common < firstText.length && common < secondText.length && firstText[common] === secondText[common]) common += 1;
+
+  assert.ok(common / firstText.length > 0.95, `expected stable prefix, got ${(common / firstText.length).toFixed(3)}`);
+  assert.match(secondText, /active-output-0/);
+  assert.match(secondText, /active-more-output-5/);
 });
 
 test("restored history prunes active-turn tool transcripts already summarized by assistant", () => {

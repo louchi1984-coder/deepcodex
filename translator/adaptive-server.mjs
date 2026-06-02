@@ -1510,7 +1510,18 @@ function repairRestoredInput(input) {
     }
     if (lastDamaged < 0 && input.length <= MAX_RESTORED_INPUT_ITEMS) return pruneRestoredToolTranscripts(input);
 
-    const start = Math.max(lastDamaged + 1, input.length - MAX_RESTORED_INPUT_ITEMS);
+    const minStart = lastDamaged + 1;
+    let activeTurnStart = -1;
+    for (let i = input.length - 1; i >= minStart; i--) {
+        const item = input[i];
+        if (item?.type === "message" && item.role === "user") {
+            activeTurnStart = i;
+            break;
+        }
+    }
+    const start = lastDamaged < 0 && activeTurnStart > 0
+        ? Math.max(minStart, activeTurnStart - MAX_RESTORED_INPUT_ITEMS)
+        : Math.max(minStart, input.length - MAX_RESTORED_INPUT_ITEMS);
     const repaired = lastDamaged >= 0
         ? [{ type: "context_compaction", summary: damagedCompactionSummary() }]
         : [];
