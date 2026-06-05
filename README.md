@@ -28,6 +28,17 @@
 
 交流反馈：抖音 / 视频号 **@娄老师说的对**
 
+## 稳定性说明（重要）
+
+**核心功能（模型通道）稳定可用。** DeepSeek 接入、Responses ↔ Chat 协议翻译、tool calls（function / custom / MCP）、DSML 伪工具调用、上下文压缩与缓存稳定化、本地 backend 投影、`web_search` / `web_fetch` —— 这些都在本机网络层完成，不依赖 Codex 的内部结构，是稳定的。
+
+**UI 层可能随 Codex 更新出问题。** 图标、设置入口、界面语言、外观面板、应用 / 窗口名等，是通过给 Codex Desktop 的 `app.asar` 打字符串补丁实现的。Codex 每次更新都可能改动其内部（混淆）代码，导致某个补丁锚点失配、对应的 UI 功能失效。**这只影响 UI 表现，不影响核心模型功能**（请求照常通过 translator 走 DeepSeek）。
+
+**UI 出问题怎么办 —— 让 agent 读 skill 自己修。** 仓库内置了修复 skill；遇到 UI 问题（图标错、设置打不开、语言卡英文、首次设置失败等），把对应 skill 交给你的 agent（Codex / Claude），它会按 **诊断 → 重新锚定 → 重建 → 验证** 的步骤修复：
+
+- Windows：`skills/deepcodex-win-repair/SKILL.md`
+- macOS：`skills/deepcodex-mac-repair/SKILL.md`
+
 ## 下载
 
 最新版本在 GitHub Release：
@@ -36,8 +47,8 @@
 
 | 平台 | 状态 | 下载 |
 | --- | --- | --- |
-| macOS | 可用 | `deepcodex-macos-2026.06.02-cache-fix.dmg` |
-| Windows | beta / preview | `deepcodex-windows-v0.1.32-cache-fix.zip` |
+| macOS | 可用 | `deepcodex-macos-2026.06.04-macos12-fix.dmg` |
+| Windows | beta / preview | `deepcodex-windows-v0.1.38-taskbar-icon-fix.zip` |
 
 > 已安装旧版的用户建议直接更新。当前版本重点修复了上下文恢复导致的缓存命中异常、上下文压缩、DSML 伪工具调用、`web_search` / `web_fetch` 回灌、假工具叙述拦截误判、macOS 退出后 translator 进程残留、Windows ASAR 补丁、Windows 外观设置页、Windows 启动端口清理、权限 / 沙盒状态初始化，以及多处 DeepSeek 兼容层问题。
 
@@ -50,14 +61,14 @@ deepcodex 不打包官方 Codex，也不修改官方 Codex app 本体。
 
 ### macOS
 
-1. 下载 `deepcodex-macos-2026.06.02-cache-fix.dmg`
+1. 下载 `deepcodex-macos-2026.06.04-macos12-fix.dmg`
 2. 打开 DMG，把 `DeepCodex.app` 拖到 `Applications`
 3. 打开 `DeepCodex`
 4. 输入 DeepSeek API key，连通后自动保存
 
 ### Windows beta
 
-1. 下载 `deepcodex-windows-v0.1.32-cache-fix.zip`
+1. 下载 `deepcodex-windows-v0.1.38-taskbar-icon-fix.zip`
 2. 解压
 3. 双击 `install-windows.bat`
 4. 从桌面快捷方式或开始菜单打开 `DeepCodex`
@@ -176,7 +187,7 @@ deepcodex app / DeepCodex.exe
 
 推荐使用 GitHub Release 里的 DMG：
 
-1. 下载 `deepcodex-macos-2026.06.02-cache-fix.dmg`
+1. 下载 `deepcodex-macos-2026.06.04-macos12-fix.dmg`
 2. 打开 DMG
 3. 把 `DeepCodex.app` 拖到 `Applications`
 4. 从“应用程序”里打开 `DeepCodex`
@@ -199,7 +210,7 @@ deepcodex app / DeepCodex.exe
 
 前置依赖：请先安装官方 **Codex Desktop for Windows**。
 
-下载 `deepcodex-windows-v0.1.32-cache-fix.zip`，解压后双击：
+下载 `deepcodex-windows-v0.1.38-taskbar-icon-fix.zip`，解压后双击：
 
 ```text
 install-windows.bat

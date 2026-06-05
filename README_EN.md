@@ -29,6 +29,17 @@ Highlights:
 
 Contact / updates: Douyin or WeChat Channels **@娄老师说的对**
 
+## Stability (important)
+
+**Core functionality (the model channel) is stable.** DeepSeek connectivity, Responses ↔ Chat translation, tool calls (function / custom / MCP), DSML pseudo-tool calls, context compaction & prompt-cache stabilization, local backend projection, and `web_search` / `web_fetch` all run in a local network-layer translator and do not depend on Codex internals.
+
+**The UI layer may break after a Codex update.** The icon, settings entry, UI language, appearance panel, and app / window name are applied by string-patching Codex Desktop's `app.asar`. Every Codex update can change its minified code and make a patch anchor stop matching, breaking that UI feature. **This only affects UI appearance, not the core model channel** (requests still go to DeepSeek via the translator).
+
+**If the UI breaks — let an agent fix it via the bundled skill.** When you hit a UI problem (wrong icon, settings won't open, stuck in English, first-setup failure), hand the matching skill to your agent (Codex / Claude); it follows a diagnose → re-anchor → rebuild → verify workflow:
+
+- Windows: `skills/deepcodex-win-repair/SKILL.md`
+- macOS: `skills/deepcodex-mac-repair/SKILL.md`
+
 ---
 
 ## Download
@@ -39,8 +50,8 @@ Latest release:
 
 | Platform | Status | Download |
 | --- | --- | --- |
-| macOS | Available | `deepcodex-macos-2026.06.02-cache-fix.dmg` |
-| Windows | beta / preview | `deepcodex-windows-v0.1.32-cache-fix.zip` |
+| macOS | Available | `deepcodex-macos-2026.06.04-macos12-fix.dmg` |
+| Windows | beta / preview | `deepcodex-windows-v0.1.38-taskbar-icon-fix.zip` |
 
 Users on older builds are encouraged to update. The current build includes fixes for restored-context cache misses, context compaction, DSML pseudo tool calls, `web_search` / `web_fetch` tool result handling, fake tool narration guards, macOS translator process cleanup, Windows ASAR patching, Windows appearance settings, Windows translator startup cleanup, permission / sandbox state initialization, and several DeepSeek compatibility issues.
 
@@ -54,14 +65,14 @@ deepcodex does not bundle official Codex Desktop and does not modify the officia
 
 ### macOS
 
-1. Download `deepcodex-macos-2026.06.02-cache-fix.dmg`
+1. Download `deepcodex-macos-2026.06.04-macos12-fix.dmg`
 2. Open the DMG and drag `DeepCodex.app` into `Applications`
 3. Open `DeepCodex`
 4. Enter your DeepSeek API key; once the connection test passes, it is saved automatically
 
 ### Windows beta
 
-1. Download `deepcodex-windows-v0.1.32-cache-fix.zip`
+1. Download `deepcodex-windows-v0.1.38-taskbar-icon-fix.zip`
 2. Unzip it
 3. Double-click `install-windows.bat`
 4. Launch `DeepCodex` from the desktop shortcut or Start Menu
